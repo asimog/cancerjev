@@ -45,6 +45,8 @@ services:
   migrate:
     build: .
     command: ["alembic", "upgrade", "head"]
+    environment:
+      CANCERJEV_DATABASE_URL: postgresql+psycopg://cancerjev:cancerjev-local@postgres/cancerjev
     depends_on:
       postgres: {condition: service_healthy}
 

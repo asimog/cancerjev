@@ -14,6 +14,8 @@ flowchart LR
 
 * The immutable logical snapshot contains identity Parquet tables, exact open-access filter, manifest,
   coverage, and provenance. Its scientific content hash excludes creation time.
+* Snapshot identity retains complete file-to-case/sample/aliquot links rather than only aggregate ID sets.
+  Publication is atomic and immutable; a completeness marker authenticates every required artifact.
 * PostgreSQL stores durable metadata/job state, never genome-scale matrices. S3/MinIO stores immutable
   SHA-256 addressed bytes; transfer cache is separate. Parquet plus DuckDB/Polars is analytical storage.
 * Coverage is computed independently per case and modality. Every analysis performs an exact
@@ -22,6 +24,9 @@ flowchart LR
   retains multiple qualifying samples in stable UUID order. Downstream analysis must resolve the
   visible ambiguity; CancerJev never chooses the first response.
 * Harmonized output is consumed as supplied by GDC. CancerJev does not rerun RNA/DNA harmonization.
+* GDC metadata responses are streamed into a configurable bounded buffer before JSON decoding. The
+  ceiling applies even when `Content-Length` is absent or wrong, and deterministic oversize responses are
+  not retried. Public project `size` is a caller result limit, not an instruction to exhaust all pages.
 
 ## Canonical measurement rules
 

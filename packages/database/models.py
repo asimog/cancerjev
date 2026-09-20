@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -117,7 +127,13 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    __table_args__ = (Index("ix_jobs_claim", "state", "job_type", "created_at"),)
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued','claimed','running','succeeded','failed','cancelled')",
+            name="ck_jobs_state",
+        ),
+        Index("ix_jobs_claim", "state", "job_type", "created_at"),
+    )
 
 
 class JobAttempt(Base):

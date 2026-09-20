@@ -10,6 +10,11 @@ class LogicalSnapshotRequest(BaseModel):
     project_id: str = Field(pattern=r"^[A-Z0-9]+-[A-Z0-9-]+$")
     gdc_release: str | None = None
     transformation_version: str = "logical-v1"
+    schema_versions: dict[str, str] = Field(default_factory=lambda: {"identity": "1"})
+    identity_mapping_version: str = "gdc-identity-v1"
+    selection_policy_version: str = "open-project-files-v1"
+    normalization_policy_version: str = "none"
+    requested_fields: tuple[str, ...] = ()
 
 
 class SnapshotObject(BaseModel):
@@ -22,6 +27,9 @@ class SnapshotObject(BaseModel):
     access: str
     data_type: str | None = None
     data_format: str | None = None
+    data_category: str | None = None
+    experimental_strategy: str | None = None
+    workflow_type: str | None = None
 
 
 class SnapshotRecord(BaseModel):

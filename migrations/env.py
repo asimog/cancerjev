@@ -1,13 +1,16 @@
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from packages.database.config import resolve_database_url
 from packages.database.models import Base
 
 config = context.config
 target_metadata = Base.metadata
+database_url = resolve_database_url(config.get_main_option("sqlalchemy.url"))
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 if context.is_offline_mode():
     context.configure(
-        url=config.get_main_option("sqlalchemy.url"),
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
     )
