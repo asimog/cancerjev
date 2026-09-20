@@ -21,6 +21,8 @@ Artifact object identity is its verified `sha256:` digest. Registry entries reco
 logical role, backend/key, optional GDC UUID/MD5, parser/schema version, row count, and creation time.
 Snapshot-to-artifact roles are recorded separately, allowing identical bytes to be reused without copying.
 API responses expose object IDs/hashes and metadata, never unrestricted storage keys or filesystem paths.
+Database triggers reject updates/deletes to artifact registry rows and audit events, and reject mutation of
+published snapshots, so immutability does not depend only on repository discipline.
 
 Cohort identity hashes the snapshot, canonical definition, definition version, sorted membership,
 exclusions, and selection-policy version. Database uniqueness is authoritative under races. Analysis

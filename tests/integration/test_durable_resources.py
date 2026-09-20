@@ -6,7 +6,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.main import app
@@ -264,6 +264,19 @@ def test_analysis_and_job_roll_back_together(factory, monkeypatch) -> None:
         )
     with factory() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
+
+
+def test_immutable_registry_audit_and_published_snapshot(factory) -> None:
+    with factory.begin() as session:
+        seed_snapshot(session)
+    statements = (
+        "UPDATE dataset_objects SET size = 99",
+        "UPDATE audit_events SET detail = 'changed'",
+        "UPDATE dataset_snapshots SET status = 'failed'",
+    )
+    for statement in statements:
+        with factory() as session, pytest.raises(DBAPIError), session.begin():
+            session.execute(text(statement))
 
 
 def test_resource_api_pagination_and_idempotency(factory) -> None:

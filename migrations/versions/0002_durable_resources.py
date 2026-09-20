@@ -103,11 +103,37 @@ CREATE TABLE idempotency_records (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY(scope, idempotency_key)
 );
+
+CREATE FUNCTION cancerjev_reject_immutable_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'immutable resource cannot be updated or deleted: %', TG_TABLE_NAME;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_dataset_objects_immutable BEFORE UPDATE OR DELETE ON dataset_objects
+FOR EACH ROW EXECUTE FUNCTION cancerjev_reject_immutable_mutation();
+CREATE TRIGGER trg_audit_events_immutable BEFORE UPDATE OR DELETE ON audit_events
+FOR EACH ROW EXECUTE FUNCTION cancerjev_reject_immutable_mutation();
+
+CREATE FUNCTION cancerjev_reject_published_snapshot_mutation() RETURNS trigger AS $$
+BEGIN
+  IF OLD.status = 'published' THEN
+    RAISE EXCEPTION 'published snapshot cannot be updated or deleted';
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_published_snapshots_immutable BEFORE UPDATE OR DELETE ON dataset_snapshots
+FOR EACH ROW EXECUTE FUNCTION cancerjev_reject_published_snapshot_mutation();
 """)
 
 
 def downgrade() -> None:
     op.execute("""
+DROP TRIGGER trg_published_snapshots_immutable ON dataset_snapshots;
+DROP FUNCTION cancerjev_reject_published_snapshot_mutation();
+DROP TRIGGER trg_audit_events_immutable ON audit_events;
+DROP TRIGGER trg_dataset_objects_immutable ON dataset_objects;
+DROP FUNCTION cancerjev_reject_immutable_mutation();
 DROP TABLE idempotency_records;
 DROP INDEX ix_audit_resource;
 ALTER TABLE audit_events DROP COLUMN context, DROP COLUMN resource_id, DROP COLUMN resource_type, DROP COLUMN actor_id;
