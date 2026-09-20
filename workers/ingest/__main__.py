@@ -1,5 +1,11 @@
-import time
+from workers.runtime import run_worker
+
+
+def materialize(payload: dict) -> dict:
+    from workers.ingest.materialize import materialize_snapshot
+
+    return materialize_snapshot(payload)
+
 
 if __name__ == "__main__":
-    while True:
-        time.sleep(30)  # transparent PostgreSQL job claimer is added with queued jobs
+    run_worker(("materialize_snapshot",), {"materialize_snapshot": materialize})

@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from apps.api.config import Settings, settings
@@ -13,6 +14,12 @@ app = FastAPI(
     title="CancerJev API",
     version="0.1.0",
     description="Research use only. Not for diagnosis or treatment decisions.",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["content-type"],
 )
 
 
