@@ -8,6 +8,7 @@ from packages.gdc.coverage import build_coverage
 from packages.gdc.filters import open_project_files
 from packages.gdc.manifest import generate_manifest
 from packages.gdc.mappings import map_file_hit
+from packages.gdc.policy import SOURCE_POLICY_VERSION, official_api, require_open
 from packages.provenance.hashing import canonical_hash
 from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotObject, SnapshotRecord
 
@@ -24,14 +25,19 @@ class LogicalSnapshotService:
         self.repository = repository
 
     async def create(self, request: LogicalSnapshotRequest) -> SnapshotRecord:
-        requested_fields = tuple(sorted(set(request.requested_fields or OPEN_FILE_FIELDS)))
+        official_api(self.client.base_url)
+        status_before = await self.client.status()
+        requested_fields = tuple(sorted(set(request.requested_fields) | set(OPEN_FILE_FIELDS)))
         payload = await self.client.get_open_files(request.project_id, fields=requested_fields)
+        status_after = await self.client.status()
+        if status_before != status_after:
+            raise ValueError("GDC status changed during snapshot discovery; retry acquisition")
         hits = payload.get("data", {}).get("hits", [])
         # Raw GDC hits deliberately never cross the canonical boundary.  GDC adds
         # requested/nested fields over time, while SnapshotObject remains strict.
         objects = tuple(sorted((map_snapshot_object(hit) for hit in hits), key=lambda x: x.file_id))
-        if any(item.access != "open" for item in objects):
-            raise ValueError("GDC returned a controlled file for an open-data snapshot")
+        for item in objects:
+            require_open(item.access)
 
         query = open_project_files(request.project_id)
         mapped = [map_file_hit(hit) for hit in hits]
@@ -55,10 +61,12 @@ class LogicalSnapshotService:
             }.values(),
             key=lambda v: (v.file_id, v.case_id, v.sample_id or "", v.aliquot_id or ""),
         )
-        release_identity = request.gdc_release or "unknown/not-reported"
+        release_identity = status_before["data_release"]
         identity = {
             "project_id": request.project_id,
             "gdc_release": release_identity,
+            "source_policy_version": SOURCE_POLICY_VERSION,
+            "gdc_status": status_before,
             "source": "NCI-GDC",
             "source_api": self.client.base_url,
             "query": query,
@@ -91,7 +99,12 @@ class LogicalSnapshotService:
             requested_fields=requested_fields,
             canonical_schema_versions=request.schema_versions,
             normalization_metadata={"policy_version": request.normalization_policy_version},
-            upstream_provenance={"release": release_identity},
+            upstream_provenance={
+                "release": release_identity,
+                "source_policy_version": SOURCE_POLICY_VERSION,
+                "status_endpoint": self.client.base_url + "/status",
+                "status": status_before,
+            },
         )
 
         def write_artifacts(root: Path) -> None:

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from apps.api.main import app
 from packages.database.models import AuditEvent, Cohort, DatasetObject, Job
 from packages.database.session import session_factory
+from packages.provenance.hashing import canonical_hash
 from packages.resources.service import (
     DurableResourceService,
     InvalidTransitionError,
@@ -42,12 +43,15 @@ def migrated_database():
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0001"
     command.upgrade(config, "head")
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
     engine.dispose()
 
 
 @pytest.fixture(autouse=True)
-def clean_database(migrated_database):
+def clean_database(migrated_database, tmp_path, monkeypatch):
+    monkeypatch.setenv("CANCERJEV_OBJECT_BACKEND", "filesystem")
+    monkeypatch.setenv("CANCERJEV_OBJECT_ROOT", str(tmp_path / "objects"))
+    monkeypatch.setenv("CANCERJEV_SNAPSHOT_ROOT", str(tmp_path / "snapshots"))
     engine = create_engine(DATABASE_URL)
     with engine.begin() as connection:
         connection.execute(
@@ -81,12 +85,14 @@ def artifact(role: str = "manifest", seed: str = "a") -> ArtifactRegistration:
 def seed_snapshot(session: Session, snapshot_id: str = "DS-TCGA-LUAD-test") -> SnapshotRecord:
     snapshot = SnapshotRecord(
         snapshot_id=snapshot_id,
-        snapshot_hash=f"sha256:{'1' * 64}",
+        snapshot_hash=canonical_hash({"test_snapshot": snapshot_id}),
         project_id="TCGA-LUAD",
         source_api="https://api.gdc.cancer.gov",
         gdc_release="42",
         query={"access": "open"},
         transformation_version="logical-v1",
+        case_ids=("c1", "c2"),
+        sample_ids=("s1", "s2"),
         objects=(
             SnapshotObject(
                 file_id="f1",
@@ -97,8 +103,104 @@ def seed_snapshot(session: Session, snapshot_id: str = "DS-TCGA-LUAD-test") -> S
             ),
         ),
     )
-    DurableResourceService(session).register_snapshot(snapshot, [artifact()])
+    # Lifecycle fixtures now supply the actual immutable graph required by cohorts.
+    import tempfile
+    from pathlib import Path
+
+    from packages.schemas.identity import AliquotRecord, CaseRecord, FileSampleLink, SampleRecord
+    from packages.storage.config import StorageSettings
+    from packages.storage.objects import object_key
+    from packages.storage.parquet import write_records
+
+    store = StorageSettings().store()
+    registrations = [artifact()]
+    with tempfile.TemporaryDirectory() as tmp:
+        for role, records, model in (
+            (
+                "cases",
+                [CaseRecord(case_id=c, project_id="TCGA-LUAD") for c in ("c1", "c2")],
+                CaseRecord,
+            ),
+            (
+                "samples",
+                [
+                    SampleRecord(sample_id="s1", case_id="c1"),
+                    SampleRecord(sample_id="s2", case_id="c2"),
+                ],
+                SampleRecord,
+            ),
+            ("aliquots", [], AliquotRecord),
+            (
+                "identity_links",
+                [FileSampleLink(file_id="f1", case_id="c1", sample_id="s1")],
+                FileSampleLink,
+            ),
+        ):
+            path = Path(tmp) / (role + ".parquet")
+            write_records(records, path, model=model)
+            raw = path.read_bytes()
+            digest = store.put(raw)
+            registrations.append(
+                ArtifactRegistration(
+                    sha256=digest,
+                    size=len(raw),
+                    media_type="application/vnd.apache.parquet",
+                    logical_role=role,
+                    storage_backend="filesystem",
+                    storage_key=object_key(digest),
+                )
+            )
+    raw = snapshot.model_dump_json().encode()
+    digest = store.put(raw)
+    registrations.append(
+        ArtifactRegistration(
+            sha256=digest,
+            size=len(raw),
+            media_type="application/json",
+            logical_role="snapshot",
+            storage_backend="filesystem",
+            storage_key=object_key(digest),
+        )
+    )
+    DurableResourceService(session).register_snapshot(snapshot, registrations)
     return snapshot
+
+
+def seed_analysis_input(session, snapshot_id="DS-TCGA-LUAD-test", seed="d"):
+    service = DurableResourceService(session)
+    source = service.register_source(
+        snapshot_id=snapshot_id,
+        artifact=artifact("test_source", "e"),
+        source_file_id="f1",
+        source_metadata={"kind": "synthetic-test"},
+    )
+    materialization_id = "sha256:" + seed * 64
+    service.register_materialization(
+        metadata=dict(
+            materialization_id=materialization_id,
+            snapshot_id=snapshot_id,
+            source_id=source.source_id,
+            output_sha256="sha256:" + "b" * 64,
+            diagnostics_sha256="sha256:" + "c" * 64,
+            modality="expression",
+            measurement_type="tpm_unstranded",
+            parser_name="test-fixture",
+            parser_version="1",
+            schema_version="2",
+            normalization_version="1",
+            selection_version="1",
+            logical_sha256="sha256:" + "f" * 64,
+            row_count=1,
+            diagnostics_summary={},
+        ),
+        output=artifact("canonical_expression", "b"),
+        diagnostics=artifact("diagnostics", "c"),
+    )
+    return dict(
+        materialization_id=materialization_id,
+        modality="expression",
+        measurement_type="tpm_unstranded",
+    )
 
 
 def cohort_request() -> CohortCreate:
@@ -112,6 +214,146 @@ def cohort_request() -> CohortCreate:
     )
 
 
+@pytest.mark.parametrize(
+    "cases,samples",
+    [
+        (["foreign-case"], []),
+        (["c1"], ["foreign-sample"]),
+        (["c2"], ["s1"]),
+        ([], ["s1"]),
+    ],
+)
+def test_cohort_rejects_non_snapshot_or_impossible_membership(factory, cases, samples):
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        with pytest.raises(ResourceConflictError, match="cohort"):
+            service.create_cohort(
+                cohort_request().model_copy(update={"case_ids": cases, "sample_ids": samples})
+            )
+        assert session.scalar(select(func.count()).select_from(Cohort)) == 0
+
+
+def test_analysis_requires_materialization_lineage_and_exact_contract(factory):
+    with factory.begin() as session:
+        seed_snapshot(session)
+        seed_snapshot(session, "DS-other")
+        service = DurableResourceService(session)
+        cohort = service.create_cohort(cohort_request())
+        valid = seed_analysis_input(session)
+        other = seed_analysis_input(session, "DS-other", "9")
+        base = dict(
+            snapshot_id=cohort.snapshot_id,
+            cohort_id=cohort.cohort_id,
+            engine="crossmodal",
+            engine_version="1",
+        )
+        with pytest.raises(ValueError):
+            AnalysisCreate(**base, expected_input_artifacts=["sha256:" + "a" * 64])
+        for invalid in (
+            other,
+            valid | {"modality": "mutation"},
+            valid | {"measurement_type": "unstranded"},
+        ):
+            with pytest.raises(ResourceConflictError, match="mismatch"):
+                service.create_analysis(
+                    AnalysisCreate(**base, input_materializations=[invalid]), "rejected-input"
+                )
+        with pytest.raises(ResourceConflictError, match="hashes"):
+            service.create_analysis(
+                AnalysisCreate(
+                    **base,
+                    input_materializations=[valid],
+                    expected_input_artifacts=["sha256:" + "a" * 64],
+                ),
+                "rejected-hash",
+            )
+        assert session.scalar(select(func.count()).select_from(Job)) == 0
+        result = service.create_analysis(
+            AnalysisCreate(**base, input_materializations=[valid]), "valid-input"
+        )
+        assert result.input_materializations == [valid]
+        assert result.expected_input_artifacts == ["sha256:" + "b" * 64]
+
+
+def test_frozen_links_and_analysis_inputs_cannot_be_mutated(factory):
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        cohort = service.create_cohort(cohort_request())
+        service.create_analysis(
+            AnalysisCreate(
+                snapshot_id=cohort.snapshot_id,
+                cohort_id=cohort.cohort_id,
+                engine="x",
+                engine_version="1",
+                input_materializations=[seed_analysis_input(session)],
+            ),
+            "immutable-inputs",
+        )
+    for statement in (
+        "UPDATE snapshot_artifacts SET sha256 = 'sha256:" + "a" * 64 + "'",
+        "DELETE FROM snapshot_artifacts",
+        "UPDATE analyses SET input_materializations = '[]'::jsonb",
+        "UPDATE analyses SET expected_input_artifacts = '[]'::jsonb",
+    ):
+        with factory.begin() as session, pytest.raises(DBAPIError):
+            session.execute(text(statement))
+
+
+def test_manifest_resolves_durable_snapshot_and_rejects_uuid_before_network(factory):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import httpx
+
+    from packages.gdc.client import GDCClient
+    from packages.gdc.manifest import generate_manifest
+    from packages.schemas.identity import FileRecord
+
+    with factory.begin() as session:
+        snapshot = seed_snapshot(session)
+        raw = generate_manifest([FileRecord(**snapshot.objects[0].model_dump())])
+        send = AsyncMock(return_value=httpx.Response(200, content=raw))
+
+        async def run():
+            async with GDCClient("https://api.gdc.cancer.gov") as client:
+                client._request = send
+                service = DurableResourceService(session)
+                with pytest.raises(ValueError, match="subset"):
+                    await service.manifest(snapshot.snapshot_id, client, ["unknown-uuid"])
+                send.assert_not_called()
+                assert await service.manifest(snapshot.snapshot_id, client, ["f1"]) == raw
+                send.assert_called_once()
+
+        asyncio.run(run())
+
+
+def test_migration_0004_roundtrip_preserves_historical_analysis(factory):
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        cohort = service.create_cohort(cohort_request())
+        analysis = service.create_analysis(
+            AnalysisCreate(
+                snapshot_id=cohort.snapshot_id,
+                cohort_id=cohort.cohort_id,
+                engine="x",
+                engine_version="1",
+                input_materializations=[seed_analysis_input(session)],
+            ),
+            "migration-inputs",
+        )
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+    command.downgrade(config, "0003")
+    command.upgrade(config, "head")
+    with factory() as session:
+        restored = DurableResourceService(session).analyses.get(str(analysis.analysis_id))
+        assert restored.expected_input_artifacts == ["sha256:" + "b" * 64]
+        assert restored.input_materializations == []  # No fabricated backfill of lost lineage.
+
+
 def test_project_snapshot_and_artifact_registry(factory) -> None:
     with factory.begin() as session:
         snapshot = seed_snapshot(session)
@@ -120,7 +362,14 @@ def test_project_snapshot_and_artifact_registry(factory) -> None:
         assert duplicate.sha256 == f"sha256:{'a' * 64}"
         assert service.projects.get("TCGA-LUAD") is not None
         assert service.snapshots.get(snapshot.snapshot_id).manifest_sha256 == duplicate.sha256
-        assert session.scalar(select(func.count()).select_from(DatasetObject)) == 1
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(DatasetObject)
+                .where(DatasetObject.sha256 == duplicate.sha256)
+            )
+            == 1
+        )
 
 
 def test_cohort_identity_and_concurrent_creation(factory) -> None:
@@ -165,7 +414,8 @@ def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
             engine="crossmodal",
             engine_version="1",
             parameters={"method": "welch"},
-            expected_input_artifacts=[f"sha256:{'a' * 64}"],
+            expected_input_artifacts=[f"sha256:{'b' * 64}"],
+            input_materializations=[seed_analysis_input(session)],
         )
         analysis = service.create_analysis(request, "analysis-key-0001")
         repeated = service.create_analysis(request, "analysis-key-0001")
@@ -236,6 +486,7 @@ def test_fk_rollback_and_matrix_rejection(factory) -> None:
                         engine="x",
                         engine_version="1",
                         parameters={"matrix": [[1, 2]]},
+                        input_materializations=[seed_analysis_input(session)],
                     ),
                     "matrix-key-0001",
                 )
@@ -259,6 +510,7 @@ def test_analysis_and_job_roll_back_together(factory, monkeypatch) -> None:
                 cohort_id=cohort.cohort_id,
                 engine="x",
                 engine_version="1",
+                input_materializations=[seed_analysis_input(session)],
             ),
             "rollback-key-0001",
         )
@@ -273,6 +525,7 @@ def test_immutable_registry_audit_and_published_snapshot(factory) -> None:
         "UPDATE dataset_objects SET size = 99",
         "UPDATE audit_events SET detail = 'changed'",
         "UPDATE dataset_snapshots SET status = 'failed'",
+        "UPDATE dataset_snapshots SET provenance = '{}'::jsonb",
     )
     for statement in statements:
         with factory() as session, pytest.raises(DBAPIError), session.begin():
@@ -286,6 +539,7 @@ def test_resource_api_pagination_and_idempotency(factory) -> None:
         service.save_project("TCGA-BRCA", name="Breast")
         service.save_project("TCGA-COAD", name="Colon")
         cohort = service.create_cohort(cohort_request())
+        analysis_input = seed_analysis_input(session)
     request = {
         "snapshot_id": "DS-TCGA-LUAD-test",
         "cohort_id": cohort.cohort_id,
@@ -293,6 +547,7 @@ def test_resource_api_pagination_and_idempotency(factory) -> None:
         "engine_version": "1",
         "parameters": {},
         "expected_input_artifacts": [],
+        "input_materializations": [analysis_input],
     }
     with TestClient(app) as client:
         page = client.get("/v1/projects", params={"limit": 1, "offset": 1})
@@ -490,7 +745,9 @@ def test_materialization_race_and_parser_version(
         thread.start()
     for thread in threads:
         thread.join(timeout=30)
-    assert not errors and len(results) == 2 and results[0] == results[1]
+    if errors:
+        raise errors[0]
+    assert len(results) == 2 and results[0] == results[1]
     new_parser = replace(
         next(p for p in parsers.PARSERS if p.modality == "expression"), version="2"
     )
@@ -555,7 +812,7 @@ def test_migration_0003_roundtrip_preserves_pr7(factory):
         assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
     command.upgrade(config, "head")
     with factory() as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
         assert session.scalar(text("SELECT count(*) FROM materializations")) == 0
         assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
 
@@ -584,7 +841,8 @@ def test_worker_uses_compact_persisted_context(
     assert result["row_count"] == 4 and not any("path" in key for key in result)
 
 
-def test_existing_pr7_snapshot_paths(factory, gdc_fixture, tmp_path):
+@pytest.mark.parametrize("publish_cas", [False, True])
+def test_existing_pr7_snapshot_paths(factory, gdc_fixture, tmp_path, publish_cas):
     import asyncio
     import json
 
@@ -603,6 +861,9 @@ def test_existing_pr7_snapshot_paths(factory, gdc_fixture, tmp_path):
     class FrozenClient:
         base_url = "https://api.gdc.cancer.gov"
 
+        async def status(self):
+            return {"version": "1", "data_release": "fixture", "status": "OK"}
+
         async def get_open_files(self, *args, **kwargs):
             return {"data": {"hits": [hit]}}
 
@@ -617,7 +878,15 @@ def test_existing_pr7_snapshot_paths(factory, gdc_fixture, tmp_path):
     )
     with factory.begin() as session:
         resources = DurableResourceService(session)
-        resources.register_snapshot(snapshot, _snapshot_artifacts(settings.snapshot_root, snapshot))
+        resources.register_snapshot(
+            snapshot,
+            _snapshot_artifacts(
+                settings.snapshot_root, snapshot, settings if publish_cas else None
+            ),
+        )
+        if publish_cas:
+            # A consumer with no shared snapshot directory must resolve from CAS alone.
+            settings = settings.model_copy(update={"snapshot_root": tmp_path / "not-mounted"})
         service = MaterializationService(resources, settings.store(), settings)
         binding = service.register_local_source(snapshot.snapshot_id, path, file_id=source.file_id)
         result = service.run(

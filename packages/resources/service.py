@@ -1,6 +1,8 @@
 import json
+import tempfile
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -30,7 +32,9 @@ from packages.database.repositories import (
     SqlProjectRepository,
     SqlSnapshotRepository,
 )
+from packages.gdc.policy import official_api, require_open
 from packages.provenance.hashing import canonical_hash
+from packages.resources.snapshots import FrozenSnapshotReader
 from packages.schemas.resources import (
     AnalysisCreate,
     ArtifactRegistration,
@@ -38,6 +42,7 @@ from packages.schemas.resources import (
     FindingCreate,
 )
 from packages.schemas.snapshot import SnapshotRecord
+from packages.storage.config import StorageSettings
 
 
 class ResourceNotFoundError(LookupError):
@@ -65,8 +70,9 @@ ANALYSIS_TRANSITIONS = {
 class DurableResourceService:
     """Transactional application boundary for durable metadata resources."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, *, storage_settings: StorageSettings | None = None):
         self.session = session
+        self.storage_settings = storage_settings or StorageSettings()
         self.projects = SqlProjectRepository(session)
         self.artifacts = SqlArtifactRepository(session)
         self.snapshots = SqlSnapshotRepository(session)
@@ -91,6 +97,9 @@ class DurableResourceService:
     def register_snapshot(
         self, snapshot: SnapshotRecord, artifacts: list[ArtifactRegistration]
     ) -> DatasetSnapshot:
+        official_api(snapshot.source_api)
+        for item in snapshot.objects:
+            require_open(item.access)
         self.save_project(snapshot.project_id)
         by_role = {
             artifact.logical_role: self.register_artifact(artifact) for artifact in artifacts
@@ -241,6 +250,7 @@ class DurableResourceService:
     def create_cohort(self, request: CohortCreate) -> Cohort:
         if self.snapshots.get(request.snapshot_id) is None:
             raise ResourceNotFoundError("snapshot not found")
+        self.validate_cohort_membership(request.snapshot_id, request.case_ids, request.sample_ids)
         identity = {
             "snapshot_id": request.snapshot_id,
             "definition_version": request.definition_version,
@@ -270,15 +280,56 @@ class DurableResourceService:
         self._audit("cohort.created", "cohort", cohort.cohort_id)
         return cohort
 
+    def validate_cohort_membership(
+        self, snapshot_id: str, case_ids: list[str], sample_ids: list[str]
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="cancerjev-cohort-") as tmp:
+            _, graph = self.snapshot_reader().load(snapshot_id, Path(tmp))
+        cases = set(case_ids)
+        samples = {sample.sample_id: sample.case_id for sample in graph.samples}
+        if not cases.issubset(graph.case_ids):
+            raise ResourceConflictError("cohort cases are not members of the frozen snapshot")
+        if not set(sample_ids).issubset(samples):
+            raise ResourceConflictError("cohort samples are not members of the frozen snapshot")
+        if any(samples[sample] not in cases for sample in sample_ids):
+            raise ResourceConflictError("cohort sample does not belong to a selected case")
+
+    def snapshot_reader(self) -> FrozenSnapshotReader:
+        return FrozenSnapshotReader(self, self.storage_settings.store(), self.storage_settings)
+
+    async def manifest(self, snapshot_id: str, client, file_ids: list[str] | None = None) -> bytes:
+        with tempfile.TemporaryDirectory(prefix="cancerjev-manifest-") as tmp:
+            snapshot, _ = self.snapshot_reader().load(snapshot_id, Path(tmp))
+        return await client.manifest(snapshot, file_ids)
+
     def create_analysis(self, request: AnalysisCreate, idempotency_key: str) -> Analysis:
         _reject_matrix_payload(request.parameters)
         snapshot = self.snapshots.get(request.snapshot_id)
         cohort = self.cohorts.get(request.cohort_id)
         if snapshot is None or cohort is None or cohort.snapshot_id != snapshot.snapshot_id:
             raise ResourceNotFoundError("snapshot/cohort combination not found")
-        for digest in request.expected_input_artifacts:
-            if self.artifacts.get(digest) is None:
-                raise ResourceNotFoundError(f"input artifact not found: {digest}")
+        self.validate_cohort_membership(snapshot.snapshot_id, cohort.case_ids, cohort.sample_ids)
+        resolved_hashes = set()
+        inputs = {}
+        for expected in request.input_materializations:
+            value = self.get_materialization(expected.materialization_id)
+            if value is None:
+                raise ResourceNotFoundError("input materialization not found")
+            if (
+                value.snapshot_id != request.snapshot_id
+                or value.modality != expected.modality
+                or value.measurement_type != expected.measurement_type
+            ):
+                raise ResourceConflictError(
+                    "input materialization snapshot/modality/measurement mismatch"
+                )
+            inputs[expected.materialization_id] = expected.model_dump(mode="json")
+            resolved_hashes.add(value.output_sha256)
+        if (
+            request.expected_input_artifacts
+            and set(request.expected_input_artifacts) != resolved_hashes
+        ):
+            raise ResourceConflictError("input hashes do not match resolved materializations")
         request_hash = canonical_hash(request.model_dump(mode="json"))
         analysis_id = uuid.uuid4()
         reservation, created = self.idempotency.reserve(
@@ -313,7 +364,8 @@ class DurableResourceService:
                 engine=request.engine,
                 engine_version=request.engine_version,
                 parameters=request.parameters,
-                expected_input_artifacts=sorted(set(request.expected_input_artifacts)),
+                expected_input_artifacts=sorted(resolved_hashes),
+                input_materializations=[inputs[key] for key in sorted(inputs)],
                 state="queued",
                 job_id=job.job_id,
                 queued_at=datetime.now(UTC),

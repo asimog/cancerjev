@@ -1,3 +1,4 @@
+from packages.gdc.policy import require_open
 from packages.schemas.identity import (
     AliquotRecord,
     CaseRecord,
@@ -12,8 +13,7 @@ def map_file_hit(
 ) -> tuple[
     FileRecord, list[CaseRecord], list[SampleRecord], list[AliquotRecord], list[FileSampleLink]
 ]:
-    if hit.get("access") != "open":
-        raise ValueError("controlled-access GDC file rejected")
+    require_open(hit.get("access"))
     analysis = hit.get("analysis") or {}
     file = FileRecord(
         **{

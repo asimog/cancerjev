@@ -158,6 +158,7 @@ class Analysis(Base):
     state: Mapped[str] = mapped_column(String(30))
     parameters: Mapped[dict] = mapped_column(JSONB)
     expected_input_artifacts: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    input_materializations: Mapped[list[dict]] = mapped_column(JSONB, default=list)
     job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.job_id"), unique=True)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

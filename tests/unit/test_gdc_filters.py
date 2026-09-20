@@ -7,10 +7,10 @@ def test_open_file_filter_cannot_omit_access_boundary() -> None:
     assert filter_ == {
         "op": "and",
         "content": [
+            {"op": "=", "content": {"field": "files.access", "value": "open"}},
             {
                 "op": "=",
                 "content": {"field": "cases.project.project_id", "value": "TCGA-LUAD"},
             },
-            {"op": "=", "content": {"field": "files.access", "value": "open"}},
         ],
     }

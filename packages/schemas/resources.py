@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -93,6 +93,16 @@ class CohortResponse(BaseModel):
     created_at: datetime
 
 
+class AnalysisInput(StrictModel):
+    materialization_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    modality: Literal["mutation", "expression", "cnv", "segment_cnv", "clinical"]
+    measurement_type: str
+
+
+class ManifestRequest(StrictModel):
+    file_ids: list[str] | None = Field(default=None, min_length=1, max_length=10000)
+
+
 class AnalysisCreate(StrictModel):
     snapshot_id: str
     cohort_id: str
@@ -100,6 +110,7 @@ class AnalysisCreate(StrictModel):
     engine_version: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     expected_input_artifacts: list[str] = Field(default_factory=list)
+    input_materializations: list[AnalysisInput] = Field(min_length=1, max_length=10000)
 
 
 class AnalysisResponse(BaseModel):
@@ -111,6 +122,7 @@ class AnalysisResponse(BaseModel):
     engine_version: str
     parameters: dict[str, Any]
     expected_input_artifacts: list[str]
+    input_materializations: list[AnalysisInput]
     state: str
     job_id: uuid.UUID | None
     error: str | None
