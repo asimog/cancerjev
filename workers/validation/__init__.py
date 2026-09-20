@@ -1,1 +1,0 @@
-"""Validated evidence processing."""

@@ -13,12 +13,6 @@ This repository starts the first vertical slice in the order defined by the arch
 3. preserve the exact filters and upstream object identifiers needed to reproduce it;
 4. expose the operation through a small FastAPI service.
 
-Jev is integrated as a separate TypeSafe System One decision boundary. It accepts shared
-state plus typed Choice, Score, and Noul questions and returns values that code can consume
-without parsing generated prose. Generative research uses a distinct OpenRouter-compatible
-client, endpoint, credential, and model; credentials are never shared implicitly between the
-two provider paths.
-
 The scaffold uses the GDC REST API directly for metadata and manifests. Bulk object transfer is deliberately delegated to the official [`NCI-GDC/gdc-client`](https://github.com/NCI-GDC/gdc-client); it is not reimplemented here. The GDC frontend and data-model projects are recorded as upstream design references rather than forked application foundations. See [`docs/architecture/technical-architecture.md`](docs/architecture/technical-architecture.md) and [`docs/architecture/upstream-gdc.md`](docs/architecture/upstream-gdc.md).
 
 ## Repository layout
@@ -29,8 +23,6 @@ packages/gdc/                GDC REST adapter and filters
 packages/schemas/            Canonical, strict domain contracts
 packages/provenance/         Deterministic hashing/canonicalization
 packages/storage/            Snapshot persistence boundary
-packages/jev/                TypeSafe Jev schemas and System One client
-packages/providers/          Generative model provider adapters
 workers/ingest/              Logical snapshot orchestration
 clients/cancerjev-agent/     Reserved contributor client boundary
 scientific/                  Deterministic scientific modules
@@ -63,19 +55,7 @@ docker compose up --build
 GET  /health
 GET  /v1/gdc/projects?size=20
 POST /v1/snapshots/logical
-POST /v1/jev/evaluate
-POST /v1/jev/evidence-judgments
 ```
 
 The snapshot endpoint accepts a `project_id`, queries only `files.access = open`, and writes an immutable logical snapshot under `CANCERJEV_SNAPSHOT_ROOT` (default: `.data/snapshots`).
 
-Set `CANCERJEV_JEV_API_KEY` to enable Jev endpoints. The general endpoint mirrors TypeSafe's
-typed evaluation model. The evidence endpoint fixes a canonical three-way
-`SUPPORT`/`CONTRADICT`/`UNRESOLVED` Choice question and labels its result as a **Jev
-evidence-classification probability**, not biological truth. Jev provider failures return a
-gateway error and do not affect deterministic GDC or snapshot processing.
-
-The generative provider is configured separately with `CANCERJEV_LLM_BASE_URL`,
-`CANCERJEV_LLM_API_KEY`, and `CANCERJEV_LLM_MODEL`. Jev uses `CANCERJEV_JEV_BASE_URL`,
-`CANCERJEV_JEV_API_KEY`, and `CANCERJEV_JEV_MODEL`, matching the TypeSafe API documented at
-<https://docs.typesafe.ai/introduction>.
