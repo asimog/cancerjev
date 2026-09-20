@@ -1,0 +1,6 @@
+CancerJev upstream notices
+==========================
+
+No NCI-GDC source code or assets are copied into this distribution. The official gdc-client is an
+external, operator-installed Apache-2.0 program. Reviewed upstream projects and exact revisions are
+recorded in docs/architecture/upstream-gdc.md.

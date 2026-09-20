@@ -8,10 +8,22 @@ version = "0.1.0"
 description = "Reproducible cancer discovery and scientific reasoning platform"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.13,<2",
+  "boto3>=1.35,<2",
+  "duckdb>=1.1,<2",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
+  "lifelines>=0.30,<1",
+  "numpy>=2,<3",
+  "polars>=1.12,<2",
+  "psycopg[binary]>=3.2,<4",
+  "pyarrow>=17,<30",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.5,<3",
+  "scikit-learn>=1.5,<2",
+  "scipy>=1.14,<2",
+  "sqlalchemy>=2.0,<3",
+  "statsmodels>=0.14,<1",
   "uvicorn[standard]>=0.30,<1",
 ]
 
@@ -36,4 +48,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-

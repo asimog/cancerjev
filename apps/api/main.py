@@ -1,6 +1,7 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.responses import FileResponse
 
 from apps.api.config import Settings, settings
 from packages.gdc.client import GDCClient
@@ -47,3 +48,23 @@ async def create_logical_snapshot(
     async with GDCClient.from_settings(config) as client:
         service = LogicalSnapshotService(client=client, repository=repository)
         return await service.create(request)
+
+
+@app.get("/v1/snapshots/{project_id}/{snapshot_id}", tags=["snapshots"])
+async def get_snapshot(
+    project_id: str, snapshot_id: str, config: Annotated[Settings, Depends(get_settings)]
+) -> FileResponse:
+    path = (config.snapshot_root / project_id / snapshot_id / "snapshot.json").resolve()
+    if config.snapshot_root.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(404, "snapshot not found")
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/v1/snapshots/{project_id}/{snapshot_id}/coverage", tags=["snapshots"])
+async def get_coverage(
+    project_id: str, snapshot_id: str, config: Annotated[Settings, Depends(get_settings)]
+) -> FileResponse:
+    path = (config.snapshot_root / project_id / snapshot_id / "coverage.parquet").resolve()
+    if config.snapshot_root.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(404, "coverage not found")
+    return FileResponse(path, media_type="application/vnd.apache.parquet")

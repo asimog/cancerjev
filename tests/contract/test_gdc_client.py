@@ -18,7 +18,4 @@ async def test_file_query_enforces_open_access() -> None:
 
     request = route.calls.last.request
     filters = json.loads(request.url.params["filters"])
-    assert {"op": "=", "content": {"field": "files.access", "value": "open"}} in filters[
-        "content"
-    ]
-
+    assert {"op": "=", "content": {"field": "files.access", "value": "open"}} in filters["content"]
