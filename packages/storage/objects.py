@@ -51,9 +51,15 @@ class FileObjectStore:
         path = self._path(digest)
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
-            tmp = path.with_suffix(".tmp")
-            tmp.write_bytes(data)
-            tmp.replace(path)
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(data)
+            try:
+                _publish_file(temporary, path, digest)
+            finally:
+                temporary.unlink(missing_ok=True)
+        elif _hash_file(path) != digest:
+            raise ValueError("existing CAS object SHA-256 mismatch")
         return digest
 
     def put_file(self, source: Path, expected_sha256: str | None = None) -> str:
@@ -69,9 +75,11 @@ class FileObjectStore:
                 shutil.copyfile(source, temporary)
                 if _hash_file(temporary) != digest:
                     raise ValueError("source changed during object publication")
-                temporary.replace(destination)
+                _publish_file(temporary, destination, digest)
             finally:
                 temporary.unlink(missing_ok=True)
+        elif _hash_file(destination) != digest:
+            raise ValueError("existing CAS object SHA-256 mismatch")
         return digest
 
     def stage(self, digest: str, destination: Path) -> None:
@@ -165,6 +173,16 @@ class S3ObjectStore:
         if ".." in Path(key).parts:
             raise ValueError("invalid cache key")
         self.client.delete_object(Bucket=self.bucket, Key=f"cache/{key}")
+
+
+def _publish_file(temporary: Path, destination: Path, digest: str) -> None:
+    # An exclusive hard link publishes complete bytes without replacing a concurrent
+    # winner (which may already have readers holding it open on Windows).
+    try:
+        destination.hardlink_to(temporary)
+    except FileExistsError:
+        if _hash_file(destination) != digest:
+            raise ValueError("existing CAS object SHA-256 mismatch") from None
 
 
 def _hash_file(path: Path) -> str:

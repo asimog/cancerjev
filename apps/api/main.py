@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pyarrow import parquet as pq
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -28,11 +28,14 @@ from packages.schemas.resources import (
     CohortCreate,
     CohortResponse,
     FindingResponse,
+    ManifestRequest,
     Page,
     ProjectResponse,
     SnapshotResponse,
 )
 from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotRecord
+from packages.storage.config import StorageSettings
+from packages.storage.objects import object_key
 from packages.storage.snapshots import FileSnapshotRepository
 from workers.ingest.snapshot import LogicalSnapshotService
 
@@ -84,6 +87,13 @@ async def not_found_handler(_request: Request, exc: ResourceNotFoundError) -> JS
 async def conflict_handler(_request: Request, exc: ResourceConflictError) -> JSONResponse:
     return JSONResponse(
         status_code=409, content={"error": {"code": "conflict", "message": str(exc)}}
+    )
+
+
+@app.exception_handler(ValueError)
+async def validation_handler(_request: Request, exc: ValueError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422, content={"error": {"code": "invalid_resource", "message": str(exc)}}
     )
 
 
@@ -139,7 +149,7 @@ async def create_logical_snapshot(request: LogicalSnapshotRequest, config: Confi
         snapshot = await LogicalSnapshotService(client=client, repository=repository).create(
             request
         )
-    registrations = _snapshot_artifacts(config.snapshot_root, snapshot)
+    registrations = _snapshot_artifacts(config.snapshot_root, snapshot, StorageSettings())
     with db.begin():
         DurableResourceService(db).register_snapshot(snapshot, registrations)
     return snapshot
@@ -156,6 +166,13 @@ def snapshots(
         project_id=project_id, limit=limit, offset=offset
     )
     return Page(items=values, limit=limit, offset=offset)
+
+
+@app.post("/v1/snapshots/{snapshot_id}/manifest", tags=["snapshots"])
+async def snapshot_manifest(snapshot_id: str, request: ManifestRequest, config: Config, db: Db):
+    async with GDCClient.from_settings(config) as client:
+        content = await DurableResourceService(db).manifest(snapshot_id, client, request.file_ids)
+    return Response(content, media_type="text/tab-separated-values")
 
 
 @app.get("/v1/snapshots/{snapshot_id}", response_model=SnapshotResponse, tags=["resources"])
@@ -280,7 +297,9 @@ def finding(finding_id: str, db: Db):
     return value
 
 
-def _snapshot_artifacts(root: Path, snapshot: SnapshotRecord) -> list[ArtifactRegistration]:
+def _snapshot_artifacts(
+    root: Path, snapshot: SnapshotRecord, storage: StorageSettings | None = None
+) -> list[ArtifactRegistration]:
     directory = root / snapshot.project_id / snapshot.snapshot_id
     marker = json.loads((directory / "COMPLETE.json").read_text(encoding="utf-8"))
     roles = {
@@ -290,18 +309,23 @@ def _snapshot_artifacts(root: Path, snapshot: SnapshotRecord) -> list[ArtifactRe
         "provenance.json": "provenance",
     }
     registrations = []
+    store = storage.store() if storage else None
     for name, digest in marker["artifact_hashes"].items():
         path = directory / name
         if sha256_file(str(path)) != digest:
             raise HTTPException(409, "published snapshot artifact hash mismatch")
+        if store and store.put_file(path) != digest:
+            raise HTTPException(409, "snapshot CAS publication hash mismatch")
         registrations.append(
             ArtifactRegistration(
                 sha256=digest,
                 size=path.stat().st_size,
                 media_type=_media_type(name),
                 logical_role=roles.get(name, name.removesuffix(".parquet").removesuffix(".json")),
-                storage_backend="filesystem",
-                storage_key=f"{snapshot.project_id}/{snapshot.snapshot_id}/{name}",
+                storage_backend=storage.object_backend if storage else "filesystem",
+                storage_key=object_key(digest)
+                if store
+                else f"{snapshot.project_id}/{snapshot.snapshot_id}/{name}",
                 parser_schema_version="identity-v1" if name.endswith(".parquet") else None,
                 row_count=pq.ParquetFile(path).metadata.num_rows
                 if name.endswith(".parquet")

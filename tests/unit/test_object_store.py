@@ -69,3 +69,47 @@ def test_s3_bounded_stage_verifies_bytes(tmp_path):
     with pytest.raises(ValueError, match="SHA-256"):
         store.stage(digest, target)
     assert not target.exists()
+
+
+@pytest.mark.parametrize("method", ["put", "put_file"])
+def test_file_cas_concurrent_publication_preserves_winner(tmp_path, monkeypatch, method):
+    import hashlib
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from packages.storage.objects import FileObjectStore, object_key
+
+    source = tmp_path / "source"
+    source.write_bytes(b"shared immutable bytes")
+    digest = "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest()
+    store = FileObjectStore(tmp_path / "objects")
+    target = store.root / object_key(digest)
+    barrier = threading.Barrier(2)
+    original_exists = Path.exists
+
+    def race_exists(path):
+        if path == target:
+            barrier.wait(timeout=10)
+            return False  # Both writers observed the key before publication.
+        return original_exists(path)
+
+    monkeypatch.setattr(Path, "exists", race_exists)
+    value = source.read_bytes() if method == "put" else source
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: getattr(store, method)(value), range(2)))
+    assert results == [digest, digest]
+    assert target.read_bytes() == source.read_bytes()
+    assert list(target.parent.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("method", ["put", "put_file"])
+def test_file_cas_rejects_existing_corrupt_object(tmp_path, method):
+    from packages.storage.objects import FileObjectStore, object_key
+
+    store = FileObjectStore(tmp_path / "objects")
+    source = tmp_path / "source"
+    source.write_bytes(b"correct")
+    digest = store.put(source.read_bytes())
+    (store.root / object_key(digest)).write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="existing CAS object"):
+        getattr(store, method)(source.read_bytes() if method == "put" else source)

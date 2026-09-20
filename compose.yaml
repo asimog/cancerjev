@@ -1,10 +1,18 @@
+x-object-environment: &object-environment
+  CANCERJEV_OBJECT_BACKEND: s3
+  CANCERJEV_OBJECT_BUCKET: cancerjev
+  CANCERJEV_OBJECT_ENDPOINT_URL: http://minio:9000
+  AWS_ACCESS_KEY_ID: cancerjev
+  AWS_SECRET_ACCESS_KEY: cancerjev-local-secret
+  AWS_DEFAULT_REGION: us-east-1
+
 services:
   api:
     build: .
     environment:
+      <<: *object-environment
       CANCERJEV_SNAPSHOT_ROOT: /data/snapshots
       CANCERJEV_DATABASE_URL: postgresql+psycopg://cancerjev:cancerjev-local@postgres/cancerjev
-      CANCERJEV_S3_ENDPOINT: http://minio:9000
     ports:
       - "8000:8000"
     volumes:
@@ -28,19 +36,23 @@ services:
     build: .
     command: ["python", "-m", "workers.ingest"]
     environment:
+      <<: *object-environment
       CANCERJEV_SNAPSHOT_ROOT: /data/snapshots
       CANCERJEV_DATABASE_URL: postgresql+psycopg://cancerjev:cancerjev-local@postgres/cancerjev
     volumes: ["snapshot-data:/data"]
     depends_on:
       migrate: {condition: service_completed_successfully}
+      minio-init: {condition: service_completed_successfully}
 
   statistics-worker:
     build: .
     command: ["python", "-m", "workers.statistics"]
     environment:
+      <<: *object-environment
       CANCERJEV_DATABASE_URL: postgresql+psycopg://cancerjev:cancerjev-local@postgres/cancerjev
     depends_on:
       migrate: {condition: service_completed_successfully}
+      minio-init: {condition: service_completed_successfully}
 
   migrate:
     build: .
@@ -53,13 +65,14 @@ services:
   web:
     build: apps/web
     environment:
+      HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:8000
       NEXT_PUBLIC_API_URL: http://localhost:8000
     ports: ["3000:3000"]
     depends_on:
       api: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -72,6 +85,7 @@ services:
       POSTGRES_PASSWORD: cancerjev-local
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cancerjev"]
+      start_period: 120s
       interval: 5s
       timeout: 5s
       retries: 10
@@ -79,7 +93,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   minio:
-    image: minio/minio:RELEASE.2024-09-22T00-33-43Z
+    image: quay.io/minio/minio:RELEASE.2024-09-22T00-33-43Z
     command: server /data --console-address :9001
     environment:
       MINIO_ROOT_USER: cancerjev
@@ -96,7 +110,7 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc:RELEASE.2024-09-16T17-43-14Z
+    image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
     entrypoint: ["/bin/sh", "-c"]
     command: ["mc alias set local http://minio:9000 cancerjev cancerjev-local-secret && mc mb --ignore-existing local/cancerjev"]
     depends_on:

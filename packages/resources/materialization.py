@@ -5,19 +5,18 @@ import shutil
 import tempfile
 from pathlib import Path
 
-import pyarrow.parquet as pq
-
-from packages.gdc.identity import SELECTION_VERSION, FrozenIdentityResolver
+from packages.gdc.identity import SELECTION_VERSION
 from packages.gdc.materialization import materialize_verified
 from packages.gdc.normalization import NORMALIZATION_VERSION
 from packages.gdc.parsers import MAX_CLINICAL_BYTES, select_parser
+from packages.gdc.policy import GDC_API
 from packages.gdc.transfer import verify_file
-from packages.provenance.hashing import canonical_hash, sha256_file
+from packages.provenance.hashing import canonical_hash
 from packages.resources.service import DurableResourceService, ResourceConflictError
-from packages.schemas.identity import AliquotRecord, CaseRecord, FileSampleLink, SampleRecord
+from packages.resources.snapshots import FrozenSnapshotReader
 from packages.schemas.materialization import MaterializationRequest
 from packages.schemas.resources import ArtifactRegistration
-from packages.schemas.snapshot import SnapshotObject, SnapshotRecord
+from packages.schemas.snapshot import SnapshotObject
 from packages.storage.config import StorageSettings
 from packages.storage.objects import ObjectStore, object_key
 
@@ -27,12 +26,13 @@ class MaterializationService:
         self, resources: DurableResourceService, store: ObjectStore, settings: StorageSettings
     ):
         self.resources, self.store, self.settings = resources, store, settings
+        self.reader = FrozenSnapshotReader(resources, store, settings)
 
     async def acquire_clinical_sources(self, snapshot_id: str, client):
         """Freeze each bounded official cases page in the same durable source contract."""
         with tempfile.TemporaryDirectory(prefix="cancerjev-clinical-") as tmp:
             root = Path(tmp)
-            snapshot, _ = self._context(snapshot_id, root)
+            snapshot, _ = self.reader.load(snapshot_id, root)
             async for raw, provenance in client.clinical_pages(snapshot.case_ids):
                 page = root / "clinical.json"
                 page.write_bytes(raw)
@@ -41,53 +41,6 @@ class MaterializationService:
                     page,
                     clinical_provenance=provenance,
                 )
-
-    def _stage(self, artifact, destination: Path) -> None:
-        if artifact.storage_key == object_key(artifact.sha256):
-            if artifact.storage_backend != self.settings.object_backend:
-                raise ValueError("artifact backend differs from configured object store")
-            self.store.stage(artifact.sha256, destination)
-        else:
-            # PR #7 snapshots register immutable snapshot-relative paths, not CAS keys.
-            if artifact.storage_backend != "filesystem":
-                raise ValueError("unsupported legacy artifact backend")
-            root = self.settings.snapshot_root.resolve()
-            source = (root / artifact.storage_key).resolve()
-            if root not in source.parents:
-                raise ValueError("snapshot artifact escapes configured root")
-            shutil.copyfile(source, destination)
-            if sha256_file(str(destination)) != artifact.sha256:
-                raise ValueError("snapshot artifact hash mismatch")
-        if destination.stat().st_size != artifact.size:
-            raise ValueError("artifact size mismatch")
-
-    def _context(self, snapshot_id: str, directory: Path):
-        artifacts = self.resources.snapshot_artifacts(snapshot_id)
-        required = {"snapshot", "cases", "samples", "aliquots", "identity_links"}
-        if not required.issubset(artifacts):
-            raise ValueError("snapshot lacks frozen identity artifacts")
-        for role in sorted(required):
-            self._stage(artifacts[role], directory / role)
-        snapshot = SnapshotRecord.model_validate_json((directory / "snapshot").read_bytes())
-        durable = self.resources.snapshots.get(snapshot_id)
-        if snapshot.snapshot_id != snapshot_id or snapshot.snapshot_hash != durable.snapshot_hash:
-            raise ValueError("snapshot context mismatch")
-        models = (
-            ("cases", CaseRecord),
-            ("samples", SampleRecord),
-            ("aliquots", AliquotRecord),
-            ("identity_links", FileSampleLink),
-        )
-        # Identity memory scales with frozen cohort metadata, never molecular row count.
-        values = [
-            tuple(
-                model.model_validate(row)
-                for batch in pq.ParquetFile(directory / role).iter_batches(batch_size=4096)
-                for row in batch.to_pylist()
-            )
-            for role, model in models
-        ]
-        return snapshot, FrozenIdentityResolver(*values)
 
     def _artifact(self, path: Path, role: str, **kwargs) -> ArtifactRegistration:
         digest = self.store.put_file(path)
@@ -114,7 +67,7 @@ class MaterializationService:
         """Trusted acquisition boundary for already acquired payloads, never a job path input."""
         with tempfile.TemporaryDirectory(prefix="cancerjev-register-") as tmp:
             root = Path(tmp)
-            snapshot, _ = self._context(snapshot_id, root)
+            snapshot, _ = self.reader.load(snapshot_id, root)
             staged = root / "source"
             shutil.copyfile(path, staged)
             if file_id:
@@ -129,7 +82,7 @@ class MaterializationService:
                 metadata = {"kind": "gdc_file", "file": source.model_dump(mode="json")}
             else:
                 if not clinical_provenance or (
-                    clinical_provenance.get("endpoint") != "https://api.gdc.cancer.gov/cases"
+                    clinical_provenance.get("endpoint") != GDC_API + "/cases"
                     or not clinical_provenance.get("acquired_at")
                     or not isinstance(clinical_provenance.get("query"), dict)
                 ):
@@ -166,7 +119,7 @@ class MaterializationService:
             raise ResourceConflictError("source/snapshot/hash mismatch")
         with tempfile.TemporaryDirectory(prefix="cancerjev-materialize-") as tmp:
             root = Path(tmp)
-            snapshot, identity = self._context(request.snapshot_id, root)
+            snapshot, identity = self.reader.load(request.snapshot_id, root)
             source = None
             if binding.source_file_id:
                 matches = [f for f in snapshot.objects if f.file_id == binding.source_file_id]
@@ -197,7 +150,7 @@ class MaterializationService:
             materialization_id = canonical_hash(lineage)
             # Check source bytes and frozen context on retry without reparsing existing output.
             source_artifact = self.resources.artifacts.get(binding.sha256)
-            self._stage(source_artifact, root / "source")
+            self.reader.stage(source_artifact, root / "source")
             if source:
                 verify_file(root / "source", source.md5sum, source.file_size)
             existing = self.resources.get_materialization(materialization_id)

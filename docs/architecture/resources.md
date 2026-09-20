@@ -48,4 +48,12 @@ scientific materialization/execution integration is implemented in a later PR.
 PR #8 adds immutable source bindings and canonical materialization lineage behind the same resource
 service. Physical DatasetObject identity stays SHA-256; separate materialization identity records
 parser/schema/policy versions and snapshot/modality/measurement lookup. See
-[GDC materialization](gdc-materialization.md). Artifact-backed statistics execution remains PR #9.
+[GDC materialization](gdc-materialization.md). Artifact-backed statistics execution remains separate work.
+
+PR09 hardens admission: cohort membership resolves through `FrozenSnapshotReader`, and new analyses
+require `input_materializations` entries naming the materialization ID, modality and measurement type.
+The service checks snapshot ownership and derives output hashes; SHA registry membership alone cannot
+authorize a scientific input. Migration 0004 freezes these input fields and snapshot artifact links.
+Historical analyses remain readable with empty bindings. Snapshot-scoped manifests and API snapshot
+CAS publication use the same frozen resource boundary. See the current [architecture map](../../ARCHITECTURE.md)
+and [ADR-003](../adr/ADR-003-gdc-trust-and-shared-storage.md) for policy and compatibility details.

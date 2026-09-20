@@ -1,87 +1,123 @@
 # CancerJev
 
-CancerJev is a reproducible cancer-discovery and distributed scientific-reasoning platform. It keeps deterministic measurements and statistics separate from untrusted AI-generated hypotheses, criticisms, and experiment proposals.
+CancerJev is a reproducible cancer-discovery and scientific-reasoning platform.
+It separates three authorities: **Deterministic Science** owns measurements and
+scientific evidence; **System One / Jev** will supply bounded semantic judgments;
+**Generative Research** will propose hypotheses, mechanisms and experiments.
+Semantic and generative output cannot replace deterministic evidence or independently
+change scientific status. Research use only; not for diagnosis or treatment.
 
-> **Research use only. Not for diagnosis or treatment decisions.**
+[The canonical architecture](ARCHITECTURE.md) defines the full pipeline, ownership,
+interfaces and implementation boundary.
 
-## Deterministic data foundation
+## Implemented today
 
-This repository starts the first vertical slice in the order defined by the architecture:
+- Official NCI GDC REST metadata, open-access-only discovery, bounded pagination,
+  status/release capture and reproducible frozen DatasetSnapshots.
+- Verified GDC source registration and PR #8 mutation MAF, STAR RNA, gene CNV,
+  segment CNV and clinical JSON parsers with immutable materialization lineage.
+- PostgreSQL resource metadata, audit records, durable jobs and renewable leases.
+- Frozen-graph cohort validation and analysis requests bound to compatible
+  snapshot/modality/measurement materializations.
+- Safe snapshot-scoped manifests; File/S3 content-addressed storage; shared MinIO
+  storage for API, ingest and statistics in Compose.
+- Resource APIs, initial project/snapshot UI and deterministic scientific primitives.
 
-1. query open NCI Genomic Data Commons (GDC) metadata;
-2. create a canonical, content-addressed logical snapshot;
-3. preserve the exact filters and upstream object identifiers needed to reproduce it;
-4. expose the operation through a small FastAPI service.
-
-The scaffold uses the GDC REST API directly for metadata and manifests. Bulk object transfer is deliberately delegated to the official [`NCI-GDC/gdc-client`](https://github.com/NCI-GDC/gdc-client); it is not reimplemented here. The GDC frontend and data-model projects are recorded as upstream design references rather than forked application foundations. See [`docs/architecture/technical-architecture.md`](docs/architecture/technical-architecture.md) and [`docs/architecture/upstream-gdc.md`](docs/architecture/upstream-gdc.md).
-
-## Repository layout
+The current verified data path is:
 
 ```text
-apps/api/                    FastAPI boundary
-packages/gdc/                GDC REST adapter and filters
-packages/schemas/            Canonical, strict domain contracts
-packages/provenance/         Deterministic hashing/canonicalization
-packages/storage/            Snapshot persistence boundary
-workers/ingest/              Logical snapshot orchestration
-clients/cancerjev-agent/     Reserved contributor client boundary
-scientific/                  Deterministic scientific modules
-tests/                       Unit and contract tests
-infra/docker/                Local container definitions
-docs/                        Architecture and protocols
+ official NCI GDC -> DatasetSnapshot -> verified source -> Materialization
+                          |                                  |
+                          +------ frozen Cohort + Analysis request
 ```
+
+## Planned
+
+Artifact-backed analysis/discovery execution, SearchRun and CandidateState gates,
+JevService/TypeSafe transport and semantic ledger, reproduction/replication,
+distributed research agents and the evidence graph remain planned. The current
+statistics worker handles legacy inline jobs and does **not** execute the durable
+`run_analysis_from_artifacts` requests. Queuing such a request is not a completed
+scientific analysis. No Jev or new scientific engine is introduced here.
+
+Production deployment on Vercel, Railway, Supabase and Cloudflare R2 is a target,
+not a claim of deployed infrastructure. Redis, Kafka and Kubernetes are not required.
 
 ## Local development
 
-Requires Python 3.12+.
+Requires Python 3.12+, Docker Compose and PostgreSQL for durable APIs.
 
 ```bash
 python -m venv .venv
-. .venv/bin/activate
+# Activate the environment for your shell.
 pip install -e '.[dev]'
-pytest
-uvicorn apps.api.main:app --reload
+docker compose up --build -d
 ```
 
-Then visit `http://localhost:8000/docs`. A complete local data-plane environment is available with:
+Open the API at `http://localhost:8000/docs` and web at `http://localhost:3000`.
+Compose applies migrations and creates one shared MinIO bucket before starting
+the API and workers. Its credentials are local development values only.
+See [.env.example](.env.example) for standalone runtime settings. S3 uses
+`CANCERJEV_OBJECT_BACKEND=s3`, `CANCERJEV_OBJECT_BUCKET` and
+`CANCERJEV_OBJECT_ENDPOINT_URL` with the standard AWS credential provider chain.
+Keep object settings consistent across services.
 
-```bash
-docker compose up --build
-```
+## GDC and scientific input contracts
 
-## First API operations
+Production authority is `https://api.gdc.cancer.gov`. Every molecular source must
+explicitly declare `access=open`; controlled, missing and unknown access fail closed.
+There is no GDC token configuration or authenticated acquisition path.
+The adapter uses documented `/status`, `/projects`, `/cases`, `/files`,
+`/files/versions/{uuids}`, `/history/{uuid}`, `/manifest` and endpoint `_mapping`.
+See the [official GDC API guide](https://docs.gdc.cancer.gov/API/Users_Guide/Getting_Started/)
+and [metadata/version contracts](https://docs.gdc.cancer.gov/API/Users_Guide/Search_and_Retrieval/).
 
 ```text
-GET  /health
 GET  /v1/gdc/projects?size=20
-POST /v1/snapshots/logical
+POST /v1/snapshots/logical                 {"project_id":"TCGA-LUAD"}
+POST /v1/snapshots/{snapshot_id}/manifest  {"file_ids":["frozen-file-uuid"]}
+POST /v1/cohorts
+POST /v1/analyses                         Idempotency-Key required
 ```
 
-The snapshot endpoint accepts a `project_id`, queries only `files.access = open`, exhausts pagination,
-and writes `snapshot.json`, `manifest.tsv`, identity/coverage Parquet tables, and `provenance.json` under
-`CANCERJEV_SNAPSHOT_ROOT`. Bulk transfer is exclusively through the official configurable `gdc-client`.
+Omit `file_ids` to request all frozen open files. Manifest metadata must still match
+the snapshot; live upstream changes cannot silently replace frozen inputs.
+Snapshot requests no longer accept `gdc_release`; release provenance comes from
+`/status`. Cohort samples must belong to explicitly selected cases in that snapshot.
+Each new analysis requires a nonempty `input_materializations` list, for example:
 
-## Bounded live TCGA-LUAD demonstration
+```json
+{
+  "materialization_id": "sha256:<64 hexadecimal characters>",
+  "modality": "expression",
+  "measurement_type": "tpm_unstranded"
+}
+```
 
-Install the official `gdc-client` first. The metadata snapshot does not download molecular payloads.
+Output hashes are resolved from immutable lineage. Optional `expected_input_artifacts`
+must exactly match them. Old SHA-only analyses remain readable but are not backfilled.
+Bulk transfer remains the official `gdc-client` wrapper; automatic production
+download orchestration is not complete.
+
+## Verification
 
 ```bash
-# discover projects
-curl 'http://localhost:8000/v1/gdc/projects?size=20'
-# create frozen LUAD logical snapshot
-curl -sS -X POST http://localhost:8000/v1/snapshots/logical \
-  -H 'content-type: application/json' -d '{"project_id":"TCGA-LUAD"}' | tee snapshot.json
-# obtain ID, inspect the coverage Parquet file with DuckDB
-SNAPSHOT_ID=$(python -c 'import json; print(json.load(open("snapshot.json"))["snapshot_id"])')
-curl -o coverage.parquet "http://localhost:8000/v1/snapshots/TCGA-LUAD/$SNAPSHOT_ID/coverage"
-duckdb -c "select * from 'coverage.parquet' limit 20"
-# materialization primitives (manifest transfer, verification) are library-level and worker-safe
-gdc-client download --resume -m ".data/snapshots/TCGA-LUAD/$SNAPSHOT_ID/manifest.tsv" -d .data/cache
-pytest tests/scientific/test_crossmodal_golden.py
-# verify/reproduce content identity
-pytest tests/unit/test_snapshot_service.py
+python -m ruff check .
+python -m pytest -q
+alembic upgrade head
+python scripts/compose_smoke.py --project cancerjev-pr09
 ```
 
-Full-project payload transfer can be large; for a bounded live smoke test use a copied manifest containing
-its header and a small number of open UUID rows. Never edit `snapshot.json` or call the subset the complete
-snapshot. See `docs/architecture/data-foundation.md` for the scientific policy and current scope.
+The integration suite needs `CANCERJEV_DATABASE_URL` pointing to a **disposable**
+PostgreSQL database: it recreates the public schema. Without it those tests skip.
+The Compose smoke script assumes the selected Compose project is already running.
+No static type checker is configured. Exact executed checks and limitations are in
+[the PR09 verification record](docs/changes/pr09-architecture-gdc-hardening.md).
+
+## Repository ownership
+
+`apps/` owns API/web boundaries; `packages/gdc/` upstream policy and parsing;
+`packages/resources/` transactional operations; `packages/database/` metadata and
+jobs; `packages/storage/` immutable bytes; `packages/schemas/` contracts;
+`scientific/` and `packages/statistics/` deterministic primitives; `workers/`
+background execution. The architectural map and ADRs document the connections.
