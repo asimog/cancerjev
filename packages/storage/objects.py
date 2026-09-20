@@ -1,6 +1,5 @@
 import hashlib
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -51,36 +50,28 @@ class FileObjectStore:
         path = self._path(digest)
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
-            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(data)
-            try:
-                _publish_file(temporary, path, digest)
-            finally:
-                temporary.unlink(missing_ok=True)
-        elif _hash_file(path) != digest:
-            raise ValueError("existing CAS object SHA-256 mismatch")
+            tmp = path.with_suffix(".tmp")
+            tmp.write_bytes(data)
+            tmp.replace(path)
         return digest
 
-    def put_file(self, source: Path, expected_sha256: str | None = None) -> str:
-        digest = _hash_file(source)
-        if expected_sha256 and expected_sha256 != digest:
-            raise ValueError("SHA-256 mismatch")
-        destination = self._path(digest)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if not destination.exists():
-            with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
-                temporary = Path(stream.name)
-            try:
-                shutil.copyfile(source, temporary)
-                if _hash_file(temporary) != digest:
-                    raise ValueError("source changed during object publication")
-                _publish_file(temporary, destination, digest)
-            finally:
-                temporary.unlink(missing_ok=True)
-        elif _hash_file(destination) != digest:
-            raise ValueError("existing CAS object SHA-256 mismatch")
-        return digest
+    def put_file(self, path: Path, expected_sha256: str | None = None) -> str:
+        import tempfile as _tf
+
+        with _tf.NamedTemporaryFile(delete=False) as tmp:
+            temp_path = Path(tmp.name)
+        try:
+            shutil.copyfile(path, temp_path)
+            digest = _hash_file(temp_path)
+            if expected_sha256 and digest != expected_sha256:
+                raise ValueError("SHA-256 mismatch")
+            destination = self._path(digest)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not destination.exists():
+                temp_path.replace(destination)
+            return digest
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def stage(self, digest: str, destination: Path) -> None:
         shutil.copyfile(self._path(digest), destination)
@@ -101,8 +92,12 @@ class FileObjectStore:
         )
 
     def delete_cache_object(self, key: str) -> None:
+        if not key:
+            raise ValueError("cache key must be nonempty")
+        if key.startswith("/") or key.startswith("\\"):
+            raise ValueError("absolute cache key is not allowed")
         if ".." in Path(key).parts:
-            raise ValueError("invalid cache key")
+            raise ValueError("invalid cache key: path traversal is not allowed")
         path = self.root / "cache" / key
         if path.is_file():
             path.unlink()
@@ -122,12 +117,20 @@ class S3ObjectStore:
         return digest
 
     def put_file(self, path: Path, expected_sha256: str | None = None) -> str:
-        digest = _hash_file(path)
-        if expected_sha256 and digest != expected_sha256:
-            raise ValueError("SHA-256 mismatch")
-        if not self.exists(digest):
-            self.client.upload_file(str(path), self.bucket, object_key(digest))
-        return digest
+        import tempfile as _tf
+
+        with _tf.NamedTemporaryFile(delete=False) as tmp:
+            temp_path = Path(tmp.name)
+        try:
+            shutil.copyfile(path, temp_path)
+            digest = _hash_file(temp_path)
+            if expected_sha256 and digest != expected_sha256:
+                raise ValueError("SHA-256 mismatch")
+            if not self.exists(digest):
+                self.client.upload_file(str(temp_path), self.bucket, object_key(digest))
+            return digest
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def get(self, digest: str) -> bytes:
         return self.client.get_object(Bucket=self.bucket, Key=object_key(digest))["Body"].read()
@@ -170,19 +173,13 @@ class S3ObjectStore:
         )
 
     def delete_cache_object(self, key: str) -> None:
+        if not key:
+            raise ValueError("cache key must be nonempty")
+        if key.startswith("/") or key.startswith("\\"):
+            raise ValueError("absolute cache key is not allowed")
         if ".." in Path(key).parts:
-            raise ValueError("invalid cache key")
+            raise ValueError("invalid cache key: path traversal is not allowed")
         self.client.delete_object(Bucket=self.bucket, Key=f"cache/{key}")
-
-
-def _publish_file(temporary: Path, destination: Path, digest: str) -> None:
-    # An exclusive hard link publishes complete bytes without replacing a concurrent
-    # winner (which may already have readers holding it open on Windows).
-    try:
-        destination.hardlink_to(temporary)
-    except FileExistsError:
-        if _hash_file(destination) != digest:
-            raise ValueError("existing CAS object SHA-256 mismatch") from None
 
 
 def _hash_file(path: Path) -> str:

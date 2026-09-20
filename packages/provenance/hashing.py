@@ -1,3 +1,5 @@
+"""Canonical identity hashing for deterministic resource fingerprints."""
+
 import hashlib
 import json
 from typing import Any
@@ -9,6 +11,11 @@ def canonical_json(value: Any) -> bytes:
 
 def canonical_hash(value: Any) -> str:
     return f"sha256:{hashlib.sha256(canonical_json(value)).hexdigest()}"
+
+
+def identity_hash(identity: dict) -> str:
+    """Deterministic snapshot identity hash that includes full entity metadata."""
+    return canonical_hash(identity)
 
 
 def sha256_file(path: str) -> str:

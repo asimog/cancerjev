@@ -108,6 +108,7 @@ class AnalysisCreate(StrictModel):
     cohort_id: str
     engine: str
     engine_version: str
+    purpose: str = "EXPLORATORY"
     parameters: dict[str, Any] = Field(default_factory=dict)
     expected_input_artifacts: list[str] = Field(default_factory=list)
     input_materializations: list[AnalysisInput] = Field(min_length=1, max_length=10000)
@@ -120,6 +121,7 @@ class AnalysisResponse(BaseModel):
     cohort_id: str | None
     engine: str
     engine_version: str
+    purpose: str = "EXPLORATORY"
     parameters: dict[str, Any]
     expected_input_artifacts: list[str]
     input_materializations: list[AnalysisInput]

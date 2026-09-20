@@ -45,3 +45,13 @@ def query(path: Path, sql: str = "SELECT * FROM data") -> pl.DataFrame:
     with duckdb.connect() as db:
         db.read_parquet(str(path.resolve())).create_view("data")
         return db.execute(sql).pl()
+
+
+def read_records(path: Path, model: type[BaseModel]) -> list[BaseModel]:
+    """Read typed records from a Parquet file using a Pydantic model."""
+    import pyarrow.parquet as pq
+    records = []
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=4096):
+        for row in batch.to_pylist():
+            records.append(model.model_validate(row))
+    return records

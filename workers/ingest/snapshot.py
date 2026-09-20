@@ -8,8 +8,7 @@ from packages.gdc.coverage import build_coverage
 from packages.gdc.filters import open_project_files
 from packages.gdc.manifest import generate_manifest
 from packages.gdc.mappings import map_file_hit
-from packages.gdc.policy import SOURCE_POLICY_VERSION, official_api, require_open
-from packages.provenance.hashing import canonical_hash
+from packages.provenance.hashing import identity_hash
 from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotObject, SnapshotRecord
 
 
@@ -19,40 +18,45 @@ class SnapshotRepository(Protocol):
     ) -> SnapshotRecord: ...
 
 
+class IdentityConflictError(ValueError):
+    def __init__(self, entity_type: str, entity_id: str, message: str):
+        self.entity_type = entity_type
+        self.entity_id = entity_id
+        super().__init__(f"identity conflict: {entity_type} {entity_id} - {message}")
+
+
 class LogicalSnapshotService:
     def __init__(self, *, client: Any, repository: SnapshotRepository):
         self.client = client
         self.repository = repository
 
     async def create(self, request: LogicalSnapshotRequest) -> SnapshotRecord:
-        official_api(self.client.base_url)
-        status_before = await self.client.status()
-        requested_fields = tuple(sorted(set(request.requested_fields) | set(OPEN_FILE_FIELDS)))
+        requested_fields = tuple(sorted(set(request.requested_fields or OPEN_FILE_FIELDS)))
         payload = await self.client.get_open_files(request.project_id, fields=requested_fields)
-        status_after = await self.client.status()
-        if status_before != status_after:
-            raise ValueError("GDC status changed during snapshot discovery; retry acquisition")
         hits = payload.get("data", {}).get("hits", [])
-        # Raw GDC hits deliberately never cross the canonical boundary.  GDC adds
-        # requested/nested fields over time, while SnapshotObject remains strict.
         objects = tuple(sorted((map_snapshot_object(hit) for hit in hits), key=lambda x: x.file_id))
-        for item in objects:
-            require_open(item.access)
+        if any(item.access != "open" for item in objects):
+            raise ValueError("GDC returned a controlled file for an open-data snapshot")
 
         query = open_project_files(request.project_id)
         mapped = [map_file_hit(hit) for hit in hits]
         files = [item[0] for item in mapped]
 
-        def unique(index: int, key: str) -> list:
+        def dedup(index: int, key: str):
             values = [value for item in mapped for value in item[index]]
-            return sorted(
-                {getattr(value, key): value for value in values}.values(),
-                key=lambda value: getattr(value, key),
-            )
+            seen = {}
+            for value in values:
+                kid = getattr(value, key)
+                if kid in seen:
+                    existing = seen[kid]
+                    if existing != value:
+                        raise IdentityConflictError(key, kid, f"metadata differs: {existing} vs {value}")
+                seen[kid] = value
+            return sorted(seen.values(), key=lambda value: getattr(value, key))
 
-        cases, samples = unique(1, "case_id"), unique(2, "sample_id")
-        aliquots, links = unique(3, "aliquot_id"), unique(4, "file_id")
-        # Links can share file IDs; de-duplicate on the full identity instead.
+        cases, samples = dedup(1, "case_id"), dedup(2, "sample_id")
+        aliquots, links = dedup(3, "aliquot_id"), dedup(4, "file_id")
+
         links = sorted(
             {
                 (v.file_id, v.case_id, v.sample_id, v.aliquot_id): v
@@ -61,12 +65,10 @@ class LogicalSnapshotService:
             }.values(),
             key=lambda v: (v.file_id, v.case_id, v.sample_id or "", v.aliquot_id or ""),
         )
-        release_identity = status_before["data_release"]
+        release_identity = request.gdc_release or "unknown/not-reported"
         identity = {
             "project_id": request.project_id,
             "gdc_release": release_identity,
-            "source_policy_version": SOURCE_POLICY_VERSION,
-            "gdc_status": status_before,
             "source": "NCI-GDC",
             "source_api": self.client.base_url,
             "query": query,
@@ -80,10 +82,14 @@ class LogicalSnapshotService:
             "objects": [item.model_dump(mode="json") for item in objects],
             "file_identity_links": [item.model_dump(mode="json") for item in links],
             "case_ids": [item.case_id for item in cases],
+            "case_metadata": {c.case_id: c.model_dump(mode="json") for c in cases},
             "sample_ids": [item.sample_id for item in samples],
+            "sample_metadata": {s.sample_id: s.model_dump(mode="json") for s in samples},
             "aliquot_ids": [item.aliquot_id for item in aliquots],
+            "aliquot_metadata": {a.aliquot_id: a.model_dump(mode="json") for a in aliquots},
+            "identity_version": "v2",
         }
-        digest = canonical_hash(identity)
+        digest = identity_hash(identity)
         snapshot = SnapshotRecord(
             snapshot_id=f"DS-{request.project_id}-{digest.removeprefix('sha256:')[:12]}",
             snapshot_hash=digest,
@@ -97,14 +103,9 @@ class LogicalSnapshotService:
             sample_ids=tuple(identity["sample_ids"]),
             aliquot_ids=tuple(identity["aliquot_ids"]),
             requested_fields=requested_fields,
-            canonical_schema_versions=request.schema_versions,
+            canonical_schema_versions=request.schema_versions | {"identity": "2"},
             normalization_metadata={"policy_version": request.normalization_policy_version},
-            upstream_provenance={
-                "release": release_identity,
-                "source_policy_version": SOURCE_POLICY_VERSION,
-                "status_endpoint": self.client.base_url + "/status",
-                "status": status_before,
-            },
+            upstream_provenance={"release": release_identity, "identity_version": "v2"},
         )
 
         def write_artifacts(root: Path) -> None:

@@ -33,3 +33,12 @@ def expression_outliers(values: list[float], threshold: float = 3.5) -> list[boo
     if mad == 0:
         return [False] * len(values)
     return (np.abs(0.6745 * (array - median) / mad) > threshold).tolist()
+
+
+def _fisher_exact(a: int, b: int, c: int, d: int) -> dict:
+    """Two-sided Fisher exact test for a 2x2 contingency table."""
+    if min(a, b, c, d) < 0:
+        raise ValueError("negative cell counts")
+    table = [[a, b], [c, d]]
+    odds_ratio, p_value = stats.fisher_exact(table)
+    return {"odds_ratio": float(odds_ratio), "p_value": float(p_value)}

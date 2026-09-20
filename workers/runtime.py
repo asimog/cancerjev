@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 
 from packages.database.config import resolve_database_url
-from packages.database.jobs import LeaseLostError, claim, fail, heartbeat, start, succeed
+from packages.database.jobs import LeaseLostError, claim, fail, heartbeat, reaper, start, succeed
 from packages.database.session import session_factory
 
 log = logging.getLogger(__name__)
@@ -53,19 +53,39 @@ def run_worker(job_types: tuple[str, ...], handlers: dict[str, Callable[[dict], 
     if lease_seconds < 1:
         raise ValueError("CANCERJEV_JOB_LEASE_SECONDS must be positive")
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
+    _reaper_interval = int(os.getenv("CANCERJEV_REAPER_INTERVAL", "300"))
+    _last_reap = 0.0
     while True:
+        # Periodic reaper run for exhausted expired attempts
+        now = time.time()
+        if now - _last_reap > _reaper_interval:
+            try:
+                with factory.begin() as session:
+                    reaped = reaper(session)
+                    if reaped:
+                        log.warning("reaper terminalized jobs: %s", reaped)
+            except Exception:
+                log.exception("reaper run failed")
+            _last_reap = now
+
         with factory.begin() as session:
             job = claim(session, worker_id, job_types, lease_seconds)
         if job is None:
             time.sleep(1)
             continue
+        attempt_token = getattr(job, "_attempt_token", None)
+        exec_context = {
+            "worker_id": worker_id,
+            "job_id": str(job.job_id),
+            "attempt_token": attempt_token,
+        }
         try:
             with factory.begin() as session:
                 start(session, job.job_id, worker_id)
             lease = LeaseHeartbeat(factory, job.job_id, worker_id, lease_seconds)
             lease.start()
             try:
-                result = handlers[job.job_type](job.payload)
+                result = handlers[job.job_type](fencing(exec_context, job.payload))
             finally:
                 lease.stop()
             if lease.lost.is_set():
@@ -87,3 +107,8 @@ def run_worker(job_types: tuple[str, ...], handlers: dict[str, Callable[[dict], 
                     )
             except LeaseLostError:
                 log.warning("job_failure_not_recorded_after_lease_loss job_id=%s", job.job_id)
+
+
+def fencing(context: dict, payload: dict) -> dict:
+    """Merge execution context into payload so handlers can verify lease ownership."""
+    return {"_fencing": context, **payload}
