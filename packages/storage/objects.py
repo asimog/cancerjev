@@ -4,6 +4,19 @@ from pathlib import Path
 from typing import Protocol
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+
+class ObjectStoreError(RuntimeError):
+    pass
+
+
+class ObjectStorePermissionError(ObjectStoreError):
+    pass
+
+
+class ObjectStoreServiceError(ObjectStoreError):
+    pass
 
 
 class ObjectStore(Protocol):
@@ -101,8 +114,26 @@ class S3ObjectStore:
         try:
             self.client.head_object(Bucket=self.bucket, Key=object_key(digest))
             return True
-        except self.client.exceptions.ClientError:
-            return False
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            code = str(error.get("Code", ""))
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
+                return False
+            permission_codes = {
+                "401",
+                "403",
+                "AccessDenied",
+                "InvalidAccessKeyId",
+                "SignatureDoesNotMatch",
+            }
+            if code in permission_codes or status in {401, 403}:
+                raise ObjectStorePermissionError("object-store access denied") from exc
+            if isinstance(status, int) and status >= 500:
+                raise ObjectStoreServiceError("object-store service unavailable") from exc
+            raise ObjectStoreError("object-store lookup failed") from exc
+        except BotoCoreError as exc:
+            raise ObjectStoreServiceError("object-store transport failed") from exc
 
     def verify(self, digest: str) -> bool:
         return (

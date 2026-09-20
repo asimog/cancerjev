@@ -1,5 +1,9 @@
+import json
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
 
+from packages.gdc.client import OPEN_FILE_FIELDS
 from packages.gdc.coverage import build_coverage
 from packages.gdc.filters import open_project_files
 from packages.gdc.manifest import generate_manifest
@@ -9,7 +13,9 @@ from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotObject, Sn
 
 
 class SnapshotRepository(Protocol):
-    def save(self, snapshot: SnapshotRecord) -> Any: ...
+    def publish(
+        self, snapshot: SnapshotRecord, write_artifacts: Callable[[Path], None]
+    ) -> SnapshotRecord: ...
 
 
 class LogicalSnapshotService:
@@ -18,7 +24,8 @@ class LogicalSnapshotService:
         self.repository = repository
 
     async def create(self, request: LogicalSnapshotRequest) -> SnapshotRecord:
-        payload = await self.client.get_open_files(request.project_id)
+        requested_fields = tuple(sorted(set(request.requested_fields or OPEN_FILE_FIELDS)))
+        payload = await self.client.get_open_files(request.project_id, fields=requested_fields)
         hits = payload.get("data", {}).get("hits", [])
         # Raw GDC hits deliberately never cross the canonical boundary.  GDC adds
         # requested/nested fields over time, while SnapshotObject remains strict.
@@ -48,12 +55,22 @@ class LogicalSnapshotService:
             }.values(),
             key=lambda v: (v.file_id, v.case_id, v.sample_id or "", v.aliquot_id or ""),
         )
+        release_identity = request.gdc_release or "unknown/not-reported"
         identity = {
             "project_id": request.project_id,
-            "gdc_release": request.gdc_release,
+            "gdc_release": release_identity,
+            "source": "NCI-GDC",
+            "source_api": self.client.base_url,
             "query": query,
+            "open_access_required": True,
+            "requested_fields": requested_fields,
             "transformation_version": request.transformation_version,
+            "schema_versions": request.schema_versions,
+            "identity_mapping_version": request.identity_mapping_version,
+            "selection_policy_version": request.selection_policy_version,
+            "normalization_policy_version": request.normalization_policy_version,
             "objects": [item.model_dump(mode="json") for item in objects],
+            "file_identity_links": [item.model_dump(mode="json") for item in links],
             "case_ids": [item.case_id for item in cases],
             "sample_ids": [item.sample_id for item in samples],
             "aliquot_ids": [item.aliquot_id for item in aliquots],
@@ -64,44 +81,50 @@ class LogicalSnapshotService:
             snapshot_hash=digest,
             project_id=request.project_id,
             source_api=self.client.base_url,
-            gdc_release=request.gdc_release,
+            gdc_release=release_identity,
             query=query,
             transformation_version=request.transformation_version,
             objects=objects,
             case_ids=tuple(identity["case_ids"]),
             sample_ids=tuple(identity["sample_ids"]),
             aliquot_ids=tuple(identity["aliquot_ids"]),
+            requested_fields=requested_fields,
+            canonical_schema_versions=request.schema_versions,
+            normalization_metadata={"policy_version": request.normalization_policy_version},
+            upstream_provenance={"release": release_identity},
         )
-        location = self.repository.save(snapshot)
-        root = location.parent
-        (root / "manifest.tsv").write_bytes(generate_manifest(files))
-        from packages.storage.parquet import write_records
 
-        write_records(cases, root / "cases.parquet")
-        write_records(samples, root / "samples.parquet")
-        write_records(
-            aliquots or [{"aliquot_id": None, "sample_id": None, "submitter_id": None}],
-            root / "aliquots.parquet",
-        )
-        write_records(files, root / "files.parquet")
-        write_records(links, root / "file_sample_links.parquet")
-        write_records(build_coverage(cases, files, links), root / "coverage.parquet")
-        import json
-
-        (root / "provenance.json").write_text(
-            json.dumps(
-                {
-                    "source": "NCI-GDC",
-                    "source_api": self.client.base_url,
-                    "transformation_version": request.transformation_version,
-                    "snapshot_hash": digest,
-                },
-                sort_keys=True,
-                indent=2,
+        def write_artifacts(root: Path) -> None:
+            from packages.gdc.coverage import CoverageRecord
+            from packages.schemas.identity import (
+                AliquotRecord,
+                CaseRecord,
+                FileRecord,
+                FileSampleLink,
+                SampleRecord,
             )
-            + "\n"
-        )
-        return snapshot
+            from packages.storage.parquet import write_records
+
+            (root / "manifest.tsv").write_bytes(generate_manifest(files))
+            write_records(cases, root / "cases.parquet", model=CaseRecord)
+            write_records(samples, root / "samples.parquet", model=SampleRecord)
+            write_records(aliquots, root / "aliquots.parquet", model=AliquotRecord)
+            write_records(files, root / "files.parquet", model=FileRecord)
+            write_records(links, root / "file_sample_links.parquet", model=FileSampleLink)
+            write_records(
+                build_coverage(cases, files, links), root / "coverage.parquet", model=CoverageRecord
+            )
+            (root / "provenance.json").write_text(
+                json.dumps(
+                    {"canonical_identity": identity, "snapshot_hash": digest},
+                    sort_keys=True,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+        return self.repository.publish(snapshot, write_artifacts)
 
 
 def map_snapshot_object(hit: dict[str, Any]) -> SnapshotObject:
@@ -114,4 +137,7 @@ def map_snapshot_object(hit: dict[str, Any]) -> SnapshotObject:
         access=hit.get("access"),
         data_type=hit.get("data_type"),
         data_format=hit.get("data_format"),
+        data_category=hit.get("data_category"),
+        experimental_strategy=hit.get("experimental_strategy"),
+        workflow_type=(hit.get("analysis") or {}).get("workflow_type"),
     )
