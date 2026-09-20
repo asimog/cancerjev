@@ -61,4 +61,3 @@ async def test_snapshot_fails_closed_on_controlled_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="controlled file"):
         await service.create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
-

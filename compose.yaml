@@ -3,6 +3,8 @@ services:
     build: .
     environment:
       CANCERJEV_SNAPSHOT_ROOT: /data/snapshots
+      CANCERJEV_DATABASE_URL: postgresql+psycopg://cancerjev:cancerjev-local@postgres/cancerjev
+      CANCERJEV_S3_ENDPOINT: http://minio:9000
     ports:
       - "8000:8000"
     volumes:
@@ -11,7 +13,27 @@ services:
       postgres:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ingest-worker:
+    build: .
+    command: ["python", "-m", "workers.ingest"]
+    environment:
+      CANCERJEV_SNAPSHOT_ROOT: /data/snapshots
+    volumes: ["snapshot-data:/data"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  statistics-worker:
+    build: .
+    command: ["python", "-m", "workers.statistics"]
+    depends_on:
+      postgres: {condition: service_healthy}
 
   postgres:
     image: postgres:16-alpine
@@ -38,9 +60,13 @@ services:
       - "9001:9001"
     volumes:
       - object-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   snapshot-data:
   postgres-data:
   object-data:
-

@@ -14,4 +14,3 @@ def test_open_file_filter_cannot_omit_access_boundary() -> None:
             {"op": "=", "content": {"field": "files.access", "value": "open"}},
         ],
     }
-

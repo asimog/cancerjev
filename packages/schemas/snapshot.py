@@ -37,4 +37,11 @@ class SnapshotRecord(BaseModel):
     transformation_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     objects: tuple[SnapshotObject, ...]
-
+    case_ids: tuple[str, ...] = ()
+    sample_ids: tuple[str, ...] = ()
+    aliquot_ids: tuple[str, ...] = ()
+    requested_fields: tuple[str, ...] = ()
+    canonical_schema_versions: dict[str, str] = Field(default_factory=lambda: {"identity": "1"})
+    normalization_metadata: dict[str, Any] = Field(default_factory=dict)
+    upstream_provenance: dict[str, str] = Field(default_factory=dict)
+    analytical_object_hashes: dict[str, str] = Field(default_factory=dict)

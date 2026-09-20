@@ -16,4 +16,3 @@ class FileSnapshotRepository:
         temporary.write_text(snapshot.model_dump_json(indent=2) + "\n", encoding="utf-8")
         temporary.replace(destination)
         return destination
-

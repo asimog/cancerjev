@@ -15,4 +15,3 @@ def open_project_files(project_id: str) -> dict[str, Any]:
         equals("cases.project.project_id", project_id),
         equals("files.access", "open"),
     )
-

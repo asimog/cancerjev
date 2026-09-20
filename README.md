@@ -4,7 +4,7 @@ CancerJev is a reproducible cancer-discovery and distributed scientific-reasonin
 
 > **Research use only. Not for diagnosis or treatment decisions.**
 
-## Current scaffold
+## Deterministic data foundation
 
 This repository starts the first vertical slice in the order defined by the architecture:
 
@@ -57,5 +57,31 @@ GET  /v1/gdc/projects?size=20
 POST /v1/snapshots/logical
 ```
 
-The snapshot endpoint accepts a `project_id`, queries only `files.access = open`, and writes an immutable logical snapshot under `CANCERJEV_SNAPSHOT_ROOT` (default: `.data/snapshots`).
+The snapshot endpoint accepts a `project_id`, queries only `files.access = open`, exhausts pagination,
+and writes `snapshot.json`, `manifest.tsv`, identity/coverage Parquet tables, and `provenance.json` under
+`CANCERJEV_SNAPSHOT_ROOT`. Bulk transfer is exclusively through the official configurable `gdc-client`.
 
+## Bounded live TCGA-LUAD demonstration
+
+Install the official `gdc-client` first. The metadata snapshot does not download molecular payloads.
+
+```bash
+# discover projects
+curl 'http://localhost:8000/v1/gdc/projects?size=20'
+# create frozen LUAD logical snapshot
+curl -sS -X POST http://localhost:8000/v1/snapshots/logical \
+  -H 'content-type: application/json' -d '{"project_id":"TCGA-LUAD"}' | tee snapshot.json
+# obtain ID, inspect the coverage Parquet file with DuckDB
+SNAPSHOT_ID=$(python -c 'import json; print(json.load(open("snapshot.json"))["snapshot_id"])')
+curl -o coverage.parquet "http://localhost:8000/v1/snapshots/TCGA-LUAD/$SNAPSHOT_ID/coverage"
+duckdb -c "select * from 'coverage.parquet' limit 20"
+# materialization primitives (manifest transfer, verification) are library-level and worker-safe
+gdc-client download --resume -m ".data/snapshots/TCGA-LUAD/$SNAPSHOT_ID/manifest.tsv" -d .data/cache
+pytest tests/scientific/test_crossmodal_golden.py
+# verify/reproduce content identity
+pytest tests/unit/test_snapshot_service.py
+```
+
+Full-project payload transfer can be large; for a bounded live smoke test use a copied manifest containing
+its header and a small number of open UUID rows. Never edit `snapshot.json` or call the subset the complete
+snapshot. See `docs/architecture/data-foundation.md` for the scientific policy and current scope.
