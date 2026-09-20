@@ -1,0 +1,177 @@
+{
+  "data": {
+    "hits": [
+      {
+        "id": "0075437e-ba1a-46be-86d6-9773209a2b5e",
+        "lost_to_followup": "No",
+        "submitter_slide_ids": [
+          "TCGA-62-A471-01A-01-TSA",
+          "TCGA-62-A471-01Z-00-DX1"
+        ],
+        "submitter_analyte_ids": [
+          "TCGA-62-A471-01A-12R",
+          "TCGA-62-A471-10A-01D",
+          "TCGA-62-A471-01A-12D",
+          "TCGA-62-A471-10A-01W",
+          "TCGA-62-A471-01A-12H",
+          "TCGA-62-A471-01A-12W"
+        ],
+        "created_datetime": null,
+        "diagnosis_ids": [
+          "9d67b469-c047-55a5-a9df-5637f9f086f8"
+        ],
+        "updated_datetime": "2025-01-06T15:02:17.454874-06:00",
+        "case_id": "0075437e-ba1a-46be-86d6-9773209a2b5e",
+        "state": "released",
+        "portion_ids": [
+          "f21d10ac-e18e-4a0f-aa14-90e7645ceda5",
+          "148b5842-c50e-4f7c-a6bd-b693355cd4bc",
+          "5d921a12-a1ec-4265-9198-1896a5054016",
+          "b56887c2-d48e-42c1-9c1b-2d2833d436f0"
+        ],
+        "submitter_portion_ids": [
+          "TCGA-62-A471-10A-01",
+          "TCGA-62-A471-01A-12",
+          "TCGA-62-A471-01A-21",
+          "TCGA-62-A471-01A-21-A45A-20"
+        ],
+        "slide_ids": [
+          "60ed05eb-2e0a-4d6e-840d-6f45f9fa4390",
+          "040833cb-a6be-49df-93d0-17dc2e905c11"
+        ],
+        "disease_type": "Adenomas and Adenocarcinomas",
+        "analyte_ids": [
+          "fa225760-467d-47f2-8560-5f9bb322abd6",
+          "5d0ec40e-be87-4e91-bf94-ec2611e7b302",
+          "caa9a6e1-5793-48e5-aed1-ed4f1a7fc592",
+          "56345c91-52cf-4561-b509-84649c4f82fb",
+          "30efc412-964b-4c97-a634-0ddb24cf9344",
+          "d24538b9-f4db-45e3-b9b0-e1a35ce90188"
+        ],
+        "submitter_id": "TCGA-62-A471",
+        "days_to_consent": 0,
+        "aliquot_ids": [
+          "69420579-3d8d-4380-8858-f8a5a4d424cc",
+          "d3a4622d-65ae-44c2-85ba-c0d7bffdc551",
+          "c634514e-679e-4fdb-a3ec-d2cabe170e9b",
+          "d0979d89-4efa-4e30-8510-8aa96a7c2f3d",
+          "08cd328f-623e-46ff-95b4-b6ddb10c155c",
+          "53aea8bc-086e-44d2-b9e1-be6c022ae263",
+          "b4dfce75-fd09-4cac-af33-49b00b2aed1e",
+          "5f224fa1-13d6-4310-a238-7482cd3bdbc6",
+          "b68872bc-a341-4293-bf53-84ef0a0e3cfb"
+        ],
+        "submitter_aliquot_ids": [
+          "TCGA-62-A471-01A-12D-A24C-01",
+          "TCGA-62-A471-01A-12W-A25J-08",
+          "TCGA-62-A471-10A-01D-A24F-08",
+          "TCGA-62-A471-10A-01W-A25K-08",
+          "TCGA-62-A471-01A-12D-A24I-05",
+          "TCGA-62-A471-01A-12H-A24G-13",
+          "TCGA-62-A471-10A-01D-A24E-01",
+          "TCGA-62-A471-01A-12D-A24D-08",
+          "TCGA-62-A471-01A-12R-A24H-07"
+        ],
+        "diagnoses": [
+          {
+            "synchronous_malignancy": "No",
+            "ajcc_pathologic_stage": "Stage IIB",
+            "days_to_diagnosis": 0,
+            "laterality": "Left",
+            "created_datetime": null,
+            "last_known_disease_status": null,
+            "tissue_or_organ_of_origin": "Upper lobe, lung",
+            "days_to_last_follow_up": null,
+            "age_at_diagnosis": 23689,
+            "primary_diagnosis": "Adenocarcinoma, NOS",
+            "updated_datetime": "2026-07-19T17:50:01.211289-05:00",
+            "prior_malignancy": "no",
+            "year_of_diagnosis": 2010,
+            "state": "released",
+            "prior_treatment": "No",
+            "diagnosis_is_primary_disease": true,
+            "days_to_last_known_disease_status": null,
+            "ajcc_staging_system_edition": "7th",
+            "ajcc_pathologic_t": "T2b",
+            "days_to_recurrence": null,
+            "morphology": "8140/3",
+            "ajcc_pathologic_n": "N1",
+            "ajcc_pathologic_m": "M0",
+            "submitter_id": "TCGA-62-A471_diagnosis",
+            "residual_disease": "R0",
+            "classification_of_tumor": "primary",
+            "diagnosis_id": "9d67b469-c047-55a5-a9df-5637f9f086f8",
+            "icd_10_code": "C34.1",
+            "site_of_resection_or_biopsy": "Lung, NOS",
+            "tumor_grade": null,
+            "sites_of_involvement": [
+              "Peripheral Lung"
+            ],
+            "progression_or_recurrence": null
+          }
+        ],
+        "sample_ids": [
+          "f0813cbf-53df-4e10-a6f4-88cb22479b6a",
+          "d149d284-56f8-43c2-a07a-a9436f7e30b8",
+          "9ab03618-703c-4401-a198-e02510807646"
+        ],
+        "consent_type": "Informed Consent",
+        "demographic": {
+          "race": "white",
+          "ethnicity": "not hispanic or latino",
+          "vital_status": "Alive",
+          "age_at_index": 64,
+          "submitter_id": "TCGA-62-A471_demographic",
+          "days_to_birth": -23689,
+          "created_datetime": null,
+          "year_of_birth": null,
+          "demographic_id": "407caae1-7c07-52e1-bca7-1e60cac760eb",
+          "updated_datetime": "2025-10-16T15:38:26.614685-05:00",
+          "age_is_obfuscated": false,
+          "state": "released",
+          "sex_at_birth": "male",
+          "year_of_death": null,
+          "country_of_residence_at_enrollment": "Germany"
+        },
+        "submitter_sample_ids": [
+          "TCGA-62-A471-10A",
+          "TCGA-62-A471-01A",
+          "TCGA-62-A471-01Z"
+        ],
+        "exposures": [
+          {
+            "cigarettes_per_day": null,
+            "tobacco_smoking_quit_year": 2006,
+            "tobacco_smoking_status": "Current Reformed Smoker for < or = 15 yrs",
+            "alcohol_history": null,
+            "updated_datetime": "2025-01-16T14:30:40.181262-06:00",
+            "exposure_id": "507257be-f92e-5764-9f26-321105f4d871",
+            "exposure_type": "Tobacco",
+            "submitter_id": "TCGA-62-A471_exposure",
+            "state": "released",
+            "created_datetime": null,
+            "alcohol_intensity": null,
+            "pack_years_smoked": 30
+          }
+        ],
+        "primary_site": "Bronchus and lung",
+        "submitter_diagnosis_ids": [
+          "TCGA-62-A471_diagnosis"
+        ],
+        "index_date": "Diagnosis"
+      }
+    ],
+    "pagination": {
+      "count": 1,
+      "total": 585,
+      "size": 1,
+      "from": 0,
+      "sort": "None",
+      "page": 1,
+      "pages": 585
+    }
+  },
+  "warnings": {
+    "expand": "unrecognized values: [diagnoses.follow_ups]"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "source": {
+    "id": "009254a2-ea81-4c76-8044-7267a9f81364",
+    "data_format": "MAF",
+    "cases": [
+      {
+        "case_id": "1575148b-0f63-44ee-86fd-93ae1a02be0b",
+        "submitter_id": "TCGA-50-5072",
+        "project": {
+          "project_id": "TCGA-LUAD"
+        },
+        "samples": [
+          {
+            "tumor_descriptor": "Primary",
+            "sample_id": "aeb9e1bc-a9d2-4aa3-8cdd-cc4edbf5edf9",
+            "submitter_id": "TCGA-50-5072-01A",
+            "sample_type": "Primary Tumor",
+            "tissue_type": "Tumor",
+            "portions": [
+              {
+                "analytes": [
+                  {
+                    "aliquots": [
+                      {
+                        "aliquot_id": "3c6dcba5-1312-40ca-b589-07f7d88b3477"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "tumor_descriptor": "Not Applicable",
+            "sample_id": "ec112003-7578-41f3-95d4-205f2c06040b",
+            "submitter_id": "TCGA-50-5072-10A",
+            "sample_type": "Blood Derived Normal",
+            "tissue_type": "Normal",
+            "portions": [
+              {
+                "analytes": [
+                  {
+                    "aliquots": [
+                      {
+                        "aliquot_id": "96a904cf-e50e-4320-8d23-2dd095845c5e"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "access": "open",
+    "file_name": "dcc71d2d-9707-4234-a3e7-49b9cf977250.wxs.aliquot_ensemble_masked.maf.gz",
+    "md5sum": "180242ac6e7db78cf6e5faa5198779fd",
+    "file_id": "009254a2-ea81-4c76-8044-7267a9f81364",
+    "data_type": "Masked Somatic Mutation",
+    "data_category": "Simple Nucleotide Variation",
+    "analysis": {
+      "workflow_type": "Aliquot Ensemble Somatic Variant Merging and Masking"
+    },
+    "experimental_strategy": "WXS",
+    "file_size": 60490
+  },
+  "acquired_at": "2026-09-20T16:23:20.837633+00:00",
+  "endpoint": "https://api.gdc.cancer.gov/data/009254a2-ea81-4c76-8044-7267a9f81364",
+  "extraction": "Leading comments, header, first 8 data rows; full acquired bytes verified against GDC MD5 and size. LF UTF-8 excerpt is a distinct fixture object.",
+  "fixture_md5": "13d8a618d753d0e3af5a182976dc3653",
+  "fixture_sha256": "sha256:7c7def54cbdc4af0dde707a79a3461ab57a35b45f742d3538f5713d068050b30"
+}

@@ -44,3 +44,8 @@ objects is intentionally deferred.
 PR 2 records artifact-backed analysis requests but does not make the current row-oriented statistics
 worker artifact-aware. Those jobs use `run_analysis_from_artifacts` and remain unclaimed until the
 scientific materialization/execution integration is implemented in a later PR.
+
+PR #8 adds immutable source bindings and canonical materialization lineage behind the same resource
+service. Physical DatasetObject identity stays SHA-256; separate materialization identity records
+parser/schema/policy versions and snapshot/modality/measurement lookup. See
+[GDC materialization](gdc-materialization.md). Artifact-backed statistics execution remains PR #9.

@@ -1,0 +1,5 @@
+# Preserve documented fixture checksums across Windows and Unix checkouts.
+tests/fixtures/gdc/** text eol=lf
+# Trailing tabs are source-format empty fields, not formatting mistakes.
+tests/fixtures/gdc/*.tsv whitespace=-blank-at-eol
+tests/fixtures/gdc/*.maf whitespace=-blank-at-eol

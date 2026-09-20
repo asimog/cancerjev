@@ -82,6 +82,40 @@ class SnapshotArtifact(Base):
     sha256: Mapped[str] = mapped_column(ForeignKey("dataset_objects.sha256"), index=True)
 
 
+class MaterializationSource(Base):
+    __tablename__ = "materialization_sources"
+    source_id: Mapped[str] = mapped_column(String(71), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("dataset_snapshots.snapshot_id"))
+    sha256: Mapped[str] = mapped_column(ForeignKey("dataset_objects.sha256"))
+    source_file_id: Mapped[str | None] = mapped_column(String(100))
+    source_metadata: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Materialization(Base):
+    __tablename__ = "materializations"
+    materialization_id: Mapped[str] = mapped_column(String(71), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("dataset_snapshots.snapshot_id"))
+    source_id: Mapped[str] = mapped_column(ForeignKey("materialization_sources.source_id"))
+    output_sha256: Mapped[str] = mapped_column(ForeignKey("dataset_objects.sha256"))
+    diagnostics_sha256: Mapped[str] = mapped_column(ForeignKey("dataset_objects.sha256"))
+    modality: Mapped[str] = mapped_column(String(40))
+    measurement_type: Mapped[str] = mapped_column(String(50))
+    parser_name: Mapped[str] = mapped_column(String(100))
+    parser_version: Mapped[str] = mapped_column(String(40))
+    schema_version: Mapped[str] = mapped_column(String(40))
+    normalization_version: Mapped[str] = mapped_column(String(100))
+    selection_version: Mapped[str] = mapped_column(String(100))
+    logical_sha256: Mapped[str] = mapped_column(String(71))
+    row_count: Mapped[int] = mapped_column(BigInteger)
+    diagnostics_summary: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        Index("ix_materializations_lookup", "snapshot_id", "modality", "measurement_type"),
+        CheckConstraint("row_count >= 0", name="ck_materialization_rows"),
+    )
+
+
 class Case(Base):
     __tablename__ = "cases"
     case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)

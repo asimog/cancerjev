@@ -1,5 +1,6 @@
 import hashlib
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -23,6 +24,7 @@ class ObjectStore(Protocol):
     def put(self, data: bytes, expected_sha256: str | None = None) -> str: ...
     def put_file(self, path: Path, expected_sha256: str | None = None) -> str: ...
     def get(self, digest: str) -> bytes: ...
+    def stage(self, digest: str, destination: Path) -> None: ...
     def exists(self, digest: str) -> bool: ...
     def verify(self, digest: str) -> bool: ...
     def delete_cache_object(self, key: str) -> None: ...
@@ -61,10 +63,22 @@ class FileObjectStore:
         destination = self._path(digest)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if not destination.exists():
-            temporary = destination.with_suffix(".tmp")
-            shutil.copyfile(source, temporary)
-            temporary.replace(destination)
+            with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+            try:
+                shutil.copyfile(source, temporary)
+                if _hash_file(temporary) != digest:
+                    raise ValueError("source changed during object publication")
+                temporary.replace(destination)
+            finally:
+                temporary.unlink(missing_ok=True)
         return digest
+
+    def stage(self, digest: str, destination: Path) -> None:
+        shutil.copyfile(self._path(digest), destination)
+        if _hash_file(destination) != digest:
+            destination.unlink()
+            raise ValueError("object SHA-256 mismatch")
 
     def get(self, digest: str) -> bytes:
         return self._path(digest).read_bytes()
@@ -109,6 +123,12 @@ class S3ObjectStore:
 
     def get(self, digest: str) -> bytes:
         return self.client.get_object(Bucket=self.bucket, Key=object_key(digest))["Body"].read()
+
+    def stage(self, digest: str, destination: Path) -> None:
+        self.client.download_file(self.bucket, object_key(digest), str(destination))
+        if _hash_file(destination) != digest:
+            destination.unlink()
+            raise ValueError("object SHA-256 mismatch")
 
     def exists(self, digest: str) -> bool:
         try:

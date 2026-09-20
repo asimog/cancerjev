@@ -1,0 +1,53 @@
+{
+  "source": {
+    "id": "0052ae83-7ae5-470a-a125-5cd94a9fa9e9",
+    "data_format": "TSV",
+    "cases": [
+      {
+        "case_id": "5d2a9a4f-678d-4089-a8c5-81a5cb696629",
+        "submitter_id": "TCGA-35-5375",
+        "project": {
+          "project_id": "TCGA-LUAD"
+        },
+        "samples": [
+          {
+            "tumor_descriptor": "Primary",
+            "sample_id": "78b3d4a5-8563-433d-b271-6e37385e0584",
+            "submitter_id": "TCGA-35-5375-01A",
+            "sample_type": "Primary Tumor",
+            "tissue_type": "Tumor",
+            "portions": [
+              {
+                "analytes": [
+                  {
+                    "aliquots": [
+                      {
+                        "aliquot_id": "ab215c47-4678-4ca9-8cd3-ac6e3e804c05"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "access": "open",
+    "file_name": "a6a6b9c6-9db7-42b3-a09f-770b7e126fbb.rna_seq.augmented_star_gene_counts.tsv",
+    "md5sum": "3965545354a18beca3a6159f16b254fe",
+    "file_id": "0052ae83-7ae5-470a-a125-5cd94a9fa9e9",
+    "data_type": "Gene Expression Quantification",
+    "data_category": "Transcriptome Profiling",
+    "analysis": {
+      "workflow_type": "STAR - Counts"
+    },
+    "experimental_strategy": "RNA-Seq",
+    "file_size": 4208285
+  },
+  "acquired_at": "2026-09-20T16:23:16.683288+00:00",
+  "endpoint": "https://api.gdc.cancer.gov/data/0052ae83-7ae5-470a-a125-5cd94a9fa9e9",
+  "extraction": "Leading comments, header, first 8 data rows; full acquired bytes verified against GDC MD5 and size. LF UTF-8 excerpt is a distinct fixture object.",
+  "fixture_md5": "b1997664abac3fdb1531b814ed384653",
+  "fixture_sha256": "sha256:24c421ea33e7e3c94bcdd097df639d0f7de0d9159dfb6e908f0183f898289374"
+}

@@ -1,0 +1,73 @@
+{
+  "source": {
+    "id": "00286821-c3a3-4cc2-984d-f072c325f957",
+    "data_format": "TSV",
+    "cases": [
+      {
+        "case_id": "da345947-498b-4272-a231-a987ed4fe151",
+        "submitter_id": "TCGA-44-A47G",
+        "project": {
+          "project_id": "TCGA-LUAD"
+        },
+        "samples": [
+          {
+            "tumor_descriptor": "Primary",
+            "sample_id": "70058d0b-3a99-490d-8f3a-97611faf2326",
+            "submitter_id": "TCGA-44-A47G-01A",
+            "sample_type": "Primary Tumor",
+            "tissue_type": "Tumor",
+            "portions": [
+              {
+                "analytes": [
+                  {
+                    "aliquots": [
+                      {
+                        "aliquot_id": "07431666-42ca-495b-a72d-81bd9332ef79"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "tumor_descriptor": "Not Applicable",
+            "sample_id": "d98e17f8-d54e-4341-bb8a-82542764a02e",
+            "submitter_id": "TCGA-44-A47G-10A",
+            "sample_type": "Blood Derived Normal",
+            "tissue_type": "Normal",
+            "portions": [
+              {
+                "analytes": [
+                  {
+                    "aliquots": [
+                      {
+                        "aliquot_id": "8fe02970-3564-4052-8d45-2b3df0fb8a8c"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "access": "open",
+    "file_name": "TCGA-LUAD.07431666-42ca-495b-a72d-81bd9332ef79.ascat3.gene_level_copy_number.v36.tsv",
+    "md5sum": "11ed6c62b39490d14c86e5c1e5646559",
+    "file_id": "00286821-c3a3-4cc2-984d-f072c325f957",
+    "data_type": "Gene Level Copy Number",
+    "data_category": "Copy Number Variation",
+    "analysis": {
+      "workflow_type": "ASCAT3"
+    },
+    "experimental_strategy": "Genotyping Array",
+    "file_size": 3445505
+  },
+  "acquired_at": "2026-09-20T16:23:19.406307+00:00",
+  "endpoint": "https://api.gdc.cancer.gov/data/00286821-c3a3-4cc2-984d-f072c325f957",
+  "extraction": "Leading comments, header, first 8 data rows; full acquired bytes verified against GDC MD5 and size. LF UTF-8 excerpt is a distinct fixture object.",
+  "fixture_md5": "96e9a9d9d83e8a683302f7f92971c22f",
+  "fixture_sha256": "sha256:14b6a50d913aa9c08746a13c0c022870fc9d211dc386aca229181ef5dfa0e4a1"
+}

@@ -33,6 +33,7 @@ OPEN_FILE_FIELDS = (
     "cases.samples.tumor_descriptor",
     "cases.samples.tissue_type",
     "cases.samples.portions.analytes.aliquots.aliquot_id",
+    "cases.samples.portions.analytes.aliquots.submitter_id",
 )
 
 
@@ -98,7 +99,10 @@ class GDCClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _request(
+        self, method: str, path: str, *, max_response_bytes: int | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        response_limit = min(self.max_response_bytes, max_response_bytes or self.max_response_bytes)
         for attempt in range(self.max_retries + 1):
             try:
                 log.info("GDC request method=%s path=%s attempt=%d", method, path, attempt + 1)
@@ -108,7 +112,7 @@ class GDCClient:
                     declared = response.headers.get("content-length")
                     if declared is not None:
                         try:
-                            if int(declared) > self.max_response_bytes:
+                            if int(declared) > response_limit:
                                 raise GDCResponseTooLarge(
                                     "GDC response exceeds configured byte limit"
                                 )
@@ -117,7 +121,7 @@ class GDCClient:
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
                         body.extend(chunk)
-                        if len(body) > self.max_response_bytes:
+                        if len(body) > response_limit:
                             raise GDCResponseTooLarge("GDC response exceeds configured byte limit")
                     bounded = httpx.Response(
                         response.status_code,
@@ -151,8 +155,12 @@ class GDCClient:
             await asyncio.sleep(min(0.25 * 2**attempt + random.uniform(0, 0.1), 8))
         raise AssertionError("unreachable")
 
-    async def _json(self, path: str, params: Mapping[str, Any]) -> dict[str, Any]:
-        response = await self._request("GET", path, params=params)
+    async def _json(
+        self, path: str, params: Mapping[str, Any], *, max_response_bytes: int | None = None
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "GET", path, params=params, max_response_bytes=max_response_bytes
+        )
         try:
             value = response.json()
         except ValueError as exc:
@@ -200,6 +208,67 @@ class GDCClient:
 
     async def collect(self, path: str, **kwargs: Any) -> list[dict[str, Any]]:
         return [hit async for hit in self.paginate(path, **kwargs)]
+
+    async def clinical_pages(self, case_ids: tuple[str, ...]):
+        """Yield bounded official cases pages for frozen UUIDs and acquisition provenance."""
+        from datetime import UTC, datetime
+
+        from packages.gdc.parsers import MAX_CLINICAL_BYTES, canonical_json
+
+        if self.base_url != "https://api.gdc.cancer.gov":
+            raise ValueError("clinical acquisition requires the official GDC API")
+        ordered = sorted(set(case_ids))
+        for start in range(0, len(ordered), 100):
+            selected = ordered[start : start + 100]
+            query = {
+                "filters": compact_json(
+                    {
+                        "op": "in",
+                        "content": {
+                            "field": "case_id",
+                            "value": selected,
+                        },
+                    }
+                ),
+                "expand": "demographic,diagnoses,diagnoses.follow_ups,exposures",
+                "sort": "case_id:asc",
+                "size": len(selected),
+                "from": 0,
+                "format": "JSON",
+            }
+            seen = set()
+            while True:
+                page = await self._json("/cases", query, max_response_bytes=MAX_CLINICAL_BYTES)
+                encoded = canonical_json(page).encode("utf-8")
+                if len(encoded) > MAX_CLINICAL_BYTES:
+                    raise GDCResponseTooLarge("clinical page exceeds parser byte limit")
+                hits = page["data"].get("hits")
+                if not isinstance(hits, list):
+                    raise GDCResponseError("clinical response lacks hits")
+                for hit in hits:
+                    case_id = hit.get("case_id") if isinstance(hit, dict) else None
+                    if case_id not in selected or case_id in seen:
+                        raise GDCResponseError("clinical response identity mismatch")
+                    seen.add(case_id)
+                total = int(page["data"].get("pagination", {}).get("total", len(hits)))
+                if total > len(selected):
+                    raise GDCResponseError("clinical response exceeds requested case membership")
+                if not hits and query["from"] < total:
+                    raise GDCResponseError("clinical pagination made no progress")
+                yield (
+                    encoded,
+                    {
+                        "endpoint": self.base_url + "/cases",
+                        "query": dict(query),
+                        "acquired_at": datetime.now(UTC).isoformat(),
+                        "acquisition_version": "gdc-cases-pages-v1",
+                    },
+                )
+                query["from"] += len(hits)
+                if query["from"] >= total:
+                    if seen != set(selected):
+                        raise GDCResponseError("clinical response missing frozen cases")
+                    break
 
     async def get_projects(self, *, size: int = 100) -> dict[str, Any]:
         if not 1 <= size <= 100:
