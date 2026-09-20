@@ -1,0 +1,40 @@
+from datetime import UTC, datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class LogicalSnapshotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    project_id: str = Field(pattern=r"^[A-Z0-9]+-[A-Z0-9-]+$")
+    gdc_release: str | None = None
+    transformation_version: str = "logical-v1"
+
+
+class SnapshotObject(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    file_id: str
+    file_name: str
+    file_size: int = Field(ge=0)
+    md5sum: str
+    access: str
+    data_type: str | None = None
+    data_format: str | None = None
+
+
+class SnapshotRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    snapshot_id: str
+    snapshot_hash: str
+    project_id: str
+    source: str = "NCI-GDC"
+    source_api: str
+    gdc_release: str | None
+    query: dict[str, Any]
+    transformation_version: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    objects: tuple[SnapshotObject, ...]
+
