@@ -4,7 +4,7 @@ import pytest
 
 from packages.schemas.snapshot import LogicalSnapshotRequest
 from packages.storage.snapshots import FileSnapshotRepository
-from workers.ingest.snapshot import LogicalSnapshotService
+from workers.ingest.snapshot import LogicalSnapshotService, map_snapshot_object
 
 
 class StubGDCClient:
@@ -61,3 +61,22 @@ async def test_snapshot_fails_closed_on_controlled_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="controlled file"):
         await service.create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+
+
+def test_raw_gdc_file_hit_is_explicitly_projected() -> None:
+    hit = {
+        "file_id": "0da7c91b-1f17-4e0c-91de-8d79b118ce53",
+        "file_name": "augmented_star_gene_counts.tsv",
+        "file_size": 918273,
+        "md5sum": "0123456789abcdef0123456789abcdef",
+        "access": "open",
+        "data_type": "Gene Expression Quantification",
+        "data_format": "TSV",
+        "data_category": "Transcriptome Profiling",
+        "experimental_strategy": "RNA-Seq",
+        "analysis": {"workflow_type": "STAR - Counts"},
+        "cases": [{"case_id": "4ec0", "samples": [{"sample_id": "ad31"}]}],
+    }
+    canonical = map_snapshot_object(hit)
+    assert canonical.file_id == hit["file_id"]
+    assert "cases" not in canonical.model_dump()

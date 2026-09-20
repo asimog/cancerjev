@@ -1,4 +1,5 @@
 import hashlib
+import shutil
 from pathlib import Path
 from typing import Protocol
 
@@ -7,6 +8,7 @@ import boto3
 
 class ObjectStore(Protocol):
     def put(self, data: bytes, expected_sha256: str | None = None) -> str: ...
+    def put_file(self, path: Path, expected_sha256: str | None = None) -> str: ...
     def get(self, digest: str) -> bytes: ...
     def exists(self, digest: str) -> bool: ...
     def verify(self, digest: str) -> bool: ...
@@ -37,6 +39,18 @@ class FileObjectStore:
             tmp = path.with_suffix(".tmp")
             tmp.write_bytes(data)
             tmp.replace(path)
+        return digest
+
+    def put_file(self, source: Path, expected_sha256: str | None = None) -> str:
+        digest = _hash_file(source)
+        if expected_sha256 and expected_sha256 != digest:
+            raise ValueError("SHA-256 mismatch")
+        destination = self._path(digest)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists():
+            temporary = destination.with_suffix(".tmp")
+            shutil.copyfile(source, temporary)
+            temporary.replace(destination)
         return digest
 
     def get(self, digest: str) -> bytes:
@@ -72,6 +86,14 @@ class S3ObjectStore:
             self.client.put_object(Bucket=self.bucket, Key=object_key(digest), Body=data)
         return digest
 
+    def put_file(self, path: Path, expected_sha256: str | None = None) -> str:
+        digest = _hash_file(path)
+        if expected_sha256 and digest != expected_sha256:
+            raise ValueError("SHA-256 mismatch")
+        if not self.exists(digest):
+            self.client.upload_file(str(path), self.bucket, object_key(digest))
+        return digest
+
     def get(self, digest: str) -> bytes:
         return self.client.get_object(Bucket=self.bucket, Key=object_key(digest))["Body"].read()
 
@@ -92,3 +114,11 @@ class S3ObjectStore:
         if ".." in Path(key).parts:
             raise ValueError("invalid cache key")
         self.client.delete_object(Bucket=self.bucket, Key=f"cache/{key}")
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"

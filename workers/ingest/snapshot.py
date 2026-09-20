@@ -20,12 +20,9 @@ class LogicalSnapshotService:
     async def create(self, request: LogicalSnapshotRequest) -> SnapshotRecord:
         payload = await self.client.get_open_files(request.project_id)
         hits = payload.get("data", {}).get("hits", [])
-        objects = tuple(
-            sorted(
-                (SnapshotObject.model_validate(hit) for hit in hits),
-                key=lambda item: item.file_id,
-            )
-        )
+        # Raw GDC hits deliberately never cross the canonical boundary.  GDC adds
+        # requested/nested fields over time, while SnapshotObject remains strict.
+        objects = tuple(sorted((map_snapshot_object(hit) for hit in hits), key=lambda x: x.file_id))
         if any(item.access != "open" for item in objects):
             raise ValueError("GDC returned a controlled file for an open-data snapshot")
 
@@ -105,3 +102,16 @@ class LogicalSnapshotService:
             + "\n"
         )
         return snapshot
+
+
+def map_snapshot_object(hit: dict[str, Any]) -> SnapshotObject:
+    """Explicitly project a transport `/files` hit into the frozen object schema."""
+    return SnapshotObject(
+        file_id=hit.get("file_id"),
+        file_name=hit.get("file_name"),
+        file_size=hit.get("file_size"),
+        md5sum=hit.get("md5sum"),
+        access=hit.get("access"),
+        data_type=hit.get("data_type"),
+        data_format=hit.get("data_format"),
+    )

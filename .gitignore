@@ -8,3 +8,7 @@ __pycache__/
 dist/
 build/
 
+
+apps/web/node_modules/
+apps/web/.next/
+apps/web/tsconfig.tsbuildinfo
