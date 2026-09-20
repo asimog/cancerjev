@@ -4,4 +4,8 @@ CancerJev separates real GDC source metadata and immutable objects from canonica
 
 `CANCERJEV_DATABASE_URL` is the runtime source of truth for API settings, workers, Alembic, integration tests, and Compose. Alembic's checked-in URL is only a local tooling fallback. Credentials must not be logged. S3 existence checks return false only for actual not-found responses; permission, transport, and service failures remain errors.
 
+Durable resource requests follow `API → DurableResourceService → repository → PostgreSQL`. Snapshot
+artifacts are registered by verified SHA-256 and linked by logical role; storage paths and unrestricted
+object keys are not public resource identity. See `docs/architecture/resources.md`.
+
 Scientific evidence is never created by an LLM. Association is not causation, exploratory structure is not an established subtype, and the application is for research use only.
