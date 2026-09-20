@@ -1,0 +1,46 @@
+services:
+  api:
+    build: .
+    environment:
+      CANCERJEV_SNAPSHOT_ROOT: /data/snapshots
+    ports:
+      - "8000:8000"
+    volumes:
+      - snapshot-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cancerjev
+      POSTGRES_USER: cancerjev
+      POSTGRES_PASSWORD: cancerjev-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cancerjev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2024-09-22T00-33-43Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: cancerjev
+      MINIO_ROOT_PASSWORD: cancerjev-local-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - object-data:/data
+
+volumes:
+  snapshot-data:
+  postgres-data:
+  object-data:
+
