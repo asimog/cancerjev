@@ -1,0 +1,7 @@
+{
+  "endpoint": "https://api.gdc.cancer.gov/cases?filters=%7B%22op%22%3A+%22in%22%2C+%22content%22%3A+%7B%22field%22%3A+%22project.project_id%22%2C+%22value%22%3A+%5B%22TCGA-LUAD%22%5D%7D%7D&size=1&expand=demographic%2Cdiagnoses%2Cdiagnoses.follow_ups%2Cexposures&sort=case_id%3Aasc",
+  "acquired_at": "2026-09-20T16:23:21.185998+00:00",
+  "extraction": "One complete cases API page, size=1, including demographic, diagnoses, follow_ups, exposures.",
+  "fixture_md5": "854f485200533fc5c2a95371929cef38",
+  "fixture_sha256": "sha256:8dbcf4a29febf4a25351c367b7d66497cb89cb5f0b27ec7f3f5601f8c332c36b"
+}

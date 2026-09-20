@@ -31,8 +31,10 @@ flowchart LR
 ## Canonical measurement rules
 
 Expression always carries `measurement_type`; counts and normalized values cannot be combined without
-an explicit transformation. Gene CNV and segment CNV have separate schemas. Mutation rows preserve SSM
-and source-file identity. No missing value is imputed. Association is not described as causal.
+an explicit transformation. Gene CNV and segment CNV have separate schemas. Mutation rows preserve
+source-file identity and source mutation identity when supplied; SSM IDs are optional in molecular v2.
+No missing value is imputed. Association is not described as causal. See
+[GDC materialization](gdc-materialization.md) for the versioned canonical parser contracts.
 
 Genome-wide CNV↔RNA uses Pearson correlation with a 95% confidence interval and centralized
 Benjamini-Hochberg FDR. Mutation↔RNA uses Welch's t-test and mean difference. RNA variance is sample

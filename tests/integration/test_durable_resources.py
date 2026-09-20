@@ -42,7 +42,7 @@ def migrated_database():
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0001"
     command.upgrade(config, "head")
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
     engine.dispose()
 
 
@@ -314,3 +314,387 @@ def test_resource_api_pagination_and_idempotency(factory) -> None:
         assert conflict.status_code == 409
         assert client.get("/v1/snapshots/DS-TCGA-LUAD-test").status_code == 200
         assert client.get("/v1/artifacts/sha256:" + "a" * 64).status_code == 200
+
+
+@pytest.fixture
+def materialization_context(factory, gdc_fixture, tmp_path):
+    from packages.resources.materialization import MaterializationService
+    from packages.schemas.identity import AliquotRecord, CaseRecord, FileSampleLink, SampleRecord
+    from packages.storage.config import StorageSettings
+    from packages.storage.objects import FileObjectStore, object_key
+    from packages.storage.parquet import write_records
+
+    settings = StorageSettings(
+        object_root=tmp_path / "objects", snapshot_root=tmp_path / "snapshots"
+    )
+    store = FileObjectStore(settings.object_root)
+    names = ("mutation.maf", "rna.tsv", "gene_cnv.tsv", "segment.tsv", "clinical.json")
+    contexts = [gdc_fixture(name) for name in names]
+    cases, samples, aliquots, links = {}, {}, {}, {}
+    for _, _, identity in contexts:
+        cases.update({c.case_id: c for c in identity.cases})
+        samples.update({s.sample_id: s for s in identity.samples})
+        aliquots.update({a.aliquot_id: a for a in identity.aliquots})
+        links.update({(v.file_id, v.case_id, v.sample_id, v.aliquot_id): v for v in identity.links})
+    snapshot = SnapshotRecord(
+        snapshot_id="DS-TCGA-LUAD-parsers",
+        snapshot_hash="sha256:" + "8" * 64,
+        project_id="TCGA-LUAD",
+        source_api="https://api.gdc.cancer.gov",
+        gdc_release="fixture",
+        query={},
+        transformation_version="logical-v1",
+        objects=tuple(source for _, source, _ in contexts if source),
+        case_ids=tuple(sorted(cases)),
+        sample_ids=tuple(sorted(samples)),
+        aliquot_ids=tuple(sorted(aliquots)),
+    )
+    registrations = []
+    for role, records, model in (
+        ("cases", cases, CaseRecord),
+        ("samples", samples, SampleRecord),
+        ("aliquots", aliquots, AliquotRecord),
+        ("identity_links", links, FileSampleLink),
+    ):
+        path = tmp_path / (role + ".parquet")
+        write_records(list(records.values()), path, model=model)
+        digest = store.put_file(path)
+        registrations.append(
+            ArtifactRegistration(
+                sha256=digest,
+                size=path.stat().st_size,
+                media_type="application/vnd.apache.parquet",
+                logical_role=role,
+                storage_backend="filesystem",
+                storage_key=object_key(digest),
+            )
+        )
+    raw = snapshot.model_dump_json().encode()
+    digest = store.put(raw)
+    registrations.append(
+        ArtifactRegistration(
+            sha256=digest,
+            size=len(raw),
+            media_type="application/json",
+            logical_role="snapshot",
+            storage_backend="filesystem",
+            storage_key=object_key(digest),
+        )
+    )
+    with factory.begin() as session:
+        DurableResourceService(session).register_snapshot(snapshot, registrations)
+    return snapshot, store, settings, contexts, MaterializationService
+
+
+@pytest.mark.parametrize(
+    "name,modality,measurement",
+    [
+        ("mutation.maf", "mutation", ""),
+        ("rna.tsv", "expression", "tpm_unstranded"),
+        ("gene_cnv.tsv", "cnv", ""),
+        ("segment.tsv", "segment_cnv", ""),
+        ("clinical.json", "clinical", ""),
+    ],
+)
+def test_durable_fixture_flow(
+    factory, materialization_context, gdc_fixture, name, modality, measurement
+):
+    import pyarrow.parquet as pq
+
+    from packages.database.models import Materialization
+    from packages.schemas.materialization import MaterializationRequest
+
+    snapshot, store, settings, _, service_type = materialization_context
+    path, source, _ = gdc_fixture(name)
+    with factory.begin() as session:
+        resources = DurableResourceService(session)
+        service = service_type(resources, store, settings)
+        binding = service.register_local_source(
+            snapshot.snapshot_id,
+            path,
+            file_id=source.file_id if source else None,
+            clinical_provenance={
+                "endpoint": "https://api.gdc.cancer.gov/cases",
+                "query": {"size": 1},
+                "acquired_at": "2026-09-20T00:00:00Z",
+            }
+            if source is None
+            else None,
+        )
+        request = MaterializationRequest(
+            snapshot_id=snapshot.snapshot_id,
+            source_id=binding.source_id,
+            expected_source_sha256=binding.sha256,
+            modality=modality,
+            measurement_type=measurement,
+        )
+    # Simulate the durable worker boundary: a new DB transaction resolves all state.
+    with factory.begin() as session:
+        service = service_type(DurableResourceService(session), store, settings)
+        first = service.run(request, batch_size=2)
+    with factory.begin() as session:
+        resources = DurableResourceService(session)
+        repeated = service_type(resources, store, settings).run(request, batch_size=3)
+        assert repeated == first
+        assert session.scalar(select(func.count()).select_from(Materialization)) == 1
+        found = resources.list_materializations(snapshot.snapshot_id, modality, measurement)
+        assert len(found) == 1 and found[0].row_count > 0
+        output = settings.object_root / "inspect.parquet"
+        store.stage(found[0].output_sha256, output)
+        assert pq.ParquetFile(output).metadata.num_rows == found[0].row_count
+        assert resources.snapshots.get(snapshot.snapshot_id).snapshot_hash == snapshot.snapshot_hash
+        assert found[0].parser_version == "1" and found[0].schema_version == "2"
+        with pytest.raises(ResourceConflictError, match="source/snapshot/hash"):
+            service_type(resources, store, settings).run(
+                request.model_copy(update={"expected_source_sha256": "sha256:" + "0" * 64})
+            )
+
+
+def test_materialization_race_and_parser_version(
+    factory, materialization_context, gdc_fixture, monkeypatch
+):
+    from dataclasses import replace
+
+    import packages.gdc.parsers as parsers
+    from packages.database.models import Materialization
+    from packages.schemas.materialization import MaterializationRequest
+
+    snapshot, store, settings, _, service_type = materialization_context
+    path, source, _ = gdc_fixture("rna.tsv")
+    with factory.begin() as session:
+        binding = service_type(
+            DurableResourceService(session), store, settings
+        ).register_local_source(snapshot.snapshot_id, path, file_id=source.file_id)
+    request = MaterializationRequest(
+        snapshot_id=snapshot.snapshot_id,
+        source_id=binding.source_id,
+        expected_source_sha256=binding.sha256,
+        modality="expression",
+        measurement_type="tpm_unstranded",
+    )
+    barrier = threading.Barrier(2)
+    results, errors = [], []
+
+    def run():
+        try:
+            with factory.begin() as session:
+                barrier.wait(timeout=10)
+                results.append(
+                    service_type(DurableResourceService(session), store, settings).run(request)
+                )
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not errors and len(results) == 2 and results[0] == results[1]
+    new_parser = replace(
+        next(p for p in parsers.PARSERS if p.modality == "expression"), version="2"
+    )
+    monkeypatch.setattr(parsers, "PARSERS", parsers.PARSERS + (new_parser,))
+    with factory.begin() as session:
+        second = service_type(DurableResourceService(session), store, settings).run(
+            request.model_copy(update={"parser_version": "2"})
+        )
+        assert second["materialization_id"] != results[0]["materialization_id"]
+        assert second["logical_sha256"] == results[0]["logical_sha256"]
+        assert second["output_sha256"] == results[0]["output_sha256"]
+        assert session.scalar(select(func.count()).select_from(Materialization)) == 2
+
+
+def test_source_binding_checks_and_rollback(
+    factory, materialization_context, gdc_fixture, monkeypatch
+):
+    from packages.database.models import Materialization
+    from packages.schemas.materialization import MaterializationRequest
+
+    snapshot, store, settings, _, service_type = materialization_context
+    path, source, _ = gdc_fixture("rna.tsv")
+    with factory.begin() as session:
+        resources = DurableResourceService(session)
+        service = service_type(resources, store, settings)
+        with pytest.raises(ValueError, match="not in frozen"):
+            service.register_local_source(snapshot.snapshot_id, path, file_id="absent")
+        binding = service.register_local_source(snapshot.snapshot_id, path, file_id=source.file_id)
+    request = MaterializationRequest(
+        snapshot_id=snapshot.snapshot_id,
+        source_id=binding.source_id,
+        expected_source_sha256=binding.sha256,
+        modality="expression",
+        measurement_type="tpm_unstranded",
+    )
+
+    def fail_audit(*args):
+        raise RuntimeError("injected registration failure")
+
+    with pytest.raises(RuntimeError, match="injected"), factory.begin() as session:
+        resources = DurableResourceService(session)
+        monkeypatch.setattr(resources, "_audit", fail_audit)
+        service_type(resources, store, settings).run(request)
+    with factory.begin() as session:
+        assert session.scalar(select(func.count()).select_from(Materialization)) == 0
+        assert (
+            service_type(DurableResourceService(session), store, settings).run(request)["row_count"]
+            > 0
+        )
+    with factory.begin() as session, pytest.raises(DBAPIError):
+        session.execute(text("UPDATE materializations SET parser_version = 'corrupt'"))
+
+
+def test_migration_0003_roundtrip_preserves_pr7(factory):
+    with factory.begin() as session:
+        snapshot = seed_snapshot(session)
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+    command.downgrade(config, "0002")
+    with factory() as session:
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
+        assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
+    command.upgrade(config, "head")
+    with factory() as session:
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
+        assert session.scalar(text("SELECT count(*) FROM materializations")) == 0
+        assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
+
+
+def test_worker_uses_compact_persisted_context(
+    factory, materialization_context, gdc_fixture, monkeypatch
+):
+    from workers.ingest.materialize import materialize_snapshot
+
+    snapshot, store, settings, _, service_type = materialization_context
+    path, source, _ = gdc_fixture("rna.tsv")
+    with factory.begin() as session:
+        binding = service_type(
+            DurableResourceService(session), store, settings
+        ).register_local_source(snapshot.snapshot_id, path, file_id=source.file_id)
+    monkeypatch.setenv("CANCERJEV_OBJECT_ROOT", str(settings.object_root))
+    result = materialize_snapshot(
+        {
+            "snapshot_id": snapshot.snapshot_id,
+            "source_id": binding.source_id,
+            "expected_source_sha256": binding.sha256,
+            "modality": "expression",
+            "measurement_type": "tpm_unstranded",
+        }
+    )
+    assert result["row_count"] == 4 and not any("path" in key for key in result)
+
+
+def test_existing_pr7_snapshot_paths(factory, gdc_fixture, tmp_path):
+    import asyncio
+    import json
+
+    from apps.api.main import _snapshot_artifacts
+    from packages.resources.materialization import MaterializationService
+    from packages.schemas.materialization import MaterializationRequest
+    from packages.schemas.snapshot import LogicalSnapshotRequest
+    from packages.storage.config import StorageSettings
+    from packages.storage.snapshots import FileSnapshotRepository
+    from workers.ingest.snapshot import LogicalSnapshotService
+
+    path, source, _ = gdc_fixture("rna.tsv")
+    hit = json.loads(path.with_name("rna.tsv.metadata.json").read_text())["source"]
+    hit.update(file_name=source.file_name, file_size=source.file_size, md5sum=source.md5sum)
+
+    class FrozenClient:
+        base_url = "https://api.gdc.cancer.gov"
+
+        async def get_open_files(self, *args, **kwargs):
+            return {"data": {"hits": [hit]}}
+
+    settings = StorageSettings(
+        object_root=tmp_path / "objects", snapshot_root=tmp_path / "snapshots"
+    )
+    snapshot = asyncio.run(
+        LogicalSnapshotService(
+            client=FrozenClient(),
+            repository=FileSnapshotRepository(settings.snapshot_root),
+        ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+    )
+    with factory.begin() as session:
+        resources = DurableResourceService(session)
+        resources.register_snapshot(snapshot, _snapshot_artifacts(settings.snapshot_root, snapshot))
+        service = MaterializationService(resources, settings.store(), settings)
+        binding = service.register_local_source(snapshot.snapshot_id, path, file_id=source.file_id)
+        result = service.run(
+            MaterializationRequest(
+                snapshot_id=snapshot.snapshot_id,
+                source_id=binding.source_id,
+                expected_source_sha256=binding.sha256,
+                modality="expression",
+                measurement_type="unstranded",
+            )
+        )
+        assert result["row_count"] == 4
+
+
+def test_clinical_source_retry_ignores_acquisition_clock(
+    factory, materialization_context, gdc_fixture
+):
+    snapshot, store, settings, _, service_type = materialization_context
+    path, _, _ = gdc_fixture("clinical.json")
+    provenance = {
+        "endpoint": "https://api.gdc.cancer.gov/cases",
+        "query": {"size": 1},
+        "acquired_at": "2026-09-20T00:00:00Z",
+    }
+    with factory.begin() as session:
+        service = service_type(DurableResourceService(session), store, settings)
+        first = service.register_local_source(
+            snapshot.snapshot_id, path, clinical_provenance=provenance
+        )
+        second = service.register_local_source(
+            snapshot.snapshot_id, path, clinical_provenance=provenance | {"acquired_at": "later"}
+        )
+        assert first.source_id == second.source_id
+        assert second.source_metadata["provenance"]["acquired_at"] == provenance["acquired_at"]
+
+
+def test_clinical_acquisition_registration_and_materialization(factory, materialization_context):
+    import asyncio
+    import json
+
+    import httpx
+
+    from packages.gdc.client import GDCClient
+    from packages.schemas.materialization import MaterializationRequest
+
+    snapshot, store, settings, _, service_type = materialization_context
+
+    def respond(request):
+        members = json.loads(request.url.params["filters"])["content"]["value"]
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "hits": [{"case_id": c} for c in members],
+                    "pagination": {"total": len(members)},
+                }
+            },
+        )
+
+    async def acquire(service):
+        async with httpx.AsyncClient(
+            base_url="https://api.gdc.cancer.gov", transport=httpx.MockTransport(respond)
+        ) as http:
+            client = GDCClient("https://api.gdc.cancer.gov", client=http)
+            return [s async for s in service.acquire_clinical_sources(snapshot.snapshot_id, client)]
+
+    with factory.begin() as session:
+        service = service_type(DurableResourceService(session), store, settings)
+        sources = asyncio.run(acquire(service))
+        assert len(sources) == 1
+        source = sources[0]
+        result = service.run(
+            MaterializationRequest(
+                snapshot_id=snapshot.snapshot_id,
+                source_id=source.source_id,
+                expected_source_sha256=source.sha256,
+                modality="clinical",
+            )
+        )
+        assert result["row_count"] == len(snapshot.case_ids)

@@ -13,6 +13,8 @@ from packages.database.models import (
     Finding,
     IdempotencyRecord,
     Job,
+    Materialization,
+    MaterializationSource,
     Project,
     SnapshotArtifact,
 )
@@ -57,6 +59,14 @@ class SqlProjectRepository(_Repository):
 
 
 class SqlArtifactRepository(_Repository):
+    def by_snapshot_role(self, snapshot_id: str) -> dict[str, DatasetObject]:
+        rows = self.session.execute(
+            select(SnapshotArtifact.logical_role, DatasetObject)
+            .join(DatasetObject, DatasetObject.sha256 == SnapshotArtifact.sha256)
+            .where(SnapshotArtifact.snapshot_id == snapshot_id)
+        )
+        return dict(rows.all())
+
     def get(self, sha256: str) -> DatasetObject | None:
         return self.session.get(DatasetObject, sha256)
 
@@ -82,6 +92,27 @@ class SqlArtifactRepository(_Repository):
                 .join(SnapshotArtifact, SnapshotArtifact.sha256 == DatasetObject.sha256)
                 .where(SnapshotArtifact.snapshot_id == snapshot_id)
                 .order_by(SnapshotArtifact.logical_role)
+            )
+        )
+
+
+class SqlMaterializationRepository(_Repository):
+    def get(self, materialization_id: str) -> Materialization | None:
+        return self.session.get(Materialization, materialization_id)
+
+    def get_source(self, source_id: str) -> MaterializationSource | None:
+        return self.session.get(MaterializationSource, source_id)
+
+    def list(self, snapshot_id: str, modality: str, measurement_type: str) -> list[Materialization]:
+        return list(
+            self.session.scalars(
+                select(Materialization)
+                .where(
+                    Materialization.snapshot_id == snapshot_id,
+                    Materialization.modality == modality,
+                    Materialization.measurement_type == measurement_type,
+                )
+                .order_by(Materialization.materialization_id)
             )
         )
 

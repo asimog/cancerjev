@@ -1,0 +1,53 @@
+{
+  "source": {
+    "id": "0102ffb2-a483-4215-a97e-facec20945e2",
+    "data_format": "TXT",
+    "cases": [
+      {
+        "case_id": "5d5cc436-6e57-4d23-a164-7f5153c2e666",
+        "submitter_id": "TCGA-44-6778",
+        "project": {
+          "project_id": "TCGA-LUAD"
+        },
+        "samples": [
+          {
+            "tumor_descriptor": "Primary",
+            "sample_id": "15321297-7110-4e79-8d6f-94c95bc83c94",
+            "submitter_id": "TCGA-44-6778-01A",
+            "sample_type": "Primary Tumor",
+            "tissue_type": "Tumor",
+            "portions": [
+              {
+                "analytes": [
+                  {
+                    "aliquots": [
+                      {
+                        "aliquot_id": "090b0e22-c7b1-40a0-ae5a-1cfe6fb93679"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "access": "open",
+    "file_name": "IMPLY_p_TCGA_b127_144_SNP_N_GenomeWideSNP_6_E05_808438.nocnv_grch38.seg.v2.txt",
+    "md5sum": "f2e2d8c8c6556f63634cdda384a83a76",
+    "file_id": "0102ffb2-a483-4215-a97e-facec20945e2",
+    "data_type": "Masked Copy Number Segment",
+    "data_category": "Copy Number Variation",
+    "analysis": {
+      "workflow_type": "DNAcopy"
+    },
+    "experimental_strategy": "Genotyping Array",
+    "file_size": 31483
+  },
+  "acquired_at": "2026-09-20T16:23:20.163711+00:00",
+  "endpoint": "https://api.gdc.cancer.gov/data/0102ffb2-a483-4215-a97e-facec20945e2",
+  "extraction": "Leading comments, header, first 8 data rows; full acquired bytes verified against GDC MD5 and size. LF UTF-8 excerpt is a distinct fixture object.",
+  "fixture_md5": "07f6f333eb19d2dbae35bea4a5edd85c",
+  "fixture_sha256": "sha256:fd413fc20375c500585530a91c3196999ec73ac49c604e7fb542c94daa1ded61"
+}

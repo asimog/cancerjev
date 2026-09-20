@@ -8,6 +8,8 @@ from packages.database.models import (
     DatasetSnapshot,
     Finding,
     Job,
+    Materialization,
+    MaterializationSource,
     Project,
 )
 
@@ -28,6 +30,15 @@ class ArtifactRepository(Protocol):
     def get(self, sha256: str) -> DatasetObject | None: ...
     def save(self, artifact: DatasetObject) -> DatasetObject: ...
     def list_for_snapshot(self, snapshot_id: str) -> list[DatasetObject]: ...
+    def by_snapshot_role(self, snapshot_id: str) -> dict[str, DatasetObject]: ...
+
+
+class MaterializationRepository(Protocol):
+    def get(self, materialization_id: str) -> Materialization | None: ...
+    def get_source(self, source_id: str) -> MaterializationSource | None: ...
+    def list(
+        self, snapshot_id: str, modality: str, measurement_type: str
+    ) -> list[Materialization]: ...
 
 
 class CohortRepository(Protocol):

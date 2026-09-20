@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -42,3 +43,29 @@ def test_s3_service_failure_is_not_missing() -> None:
     client.head_object.side_effect = EndpointConnectionError(endpoint_url="http://minio")
     with pytest.raises(ObjectStoreServiceError):
         store_with_client(client).exists("a" * 64)
+
+
+def test_s3_bounded_stage_verifies_bytes(tmp_path):
+    import hashlib
+    from unittest.mock import Mock
+
+    from packages.storage.objects import S3ObjectStore, object_key
+
+    store = object.__new__(S3ObjectStore)
+    store.bucket = "test"
+    store.client = Mock()
+    source = b"payload"
+    digest = "sha256:" + hashlib.sha256(source).hexdigest()
+    target = tmp_path / "source"
+    store.client.download_file.side_effect = lambda bucket, key, path: Path(path).write_bytes(
+        source
+    )
+    store.stage(digest, target)
+    store.client.download_file.assert_called_once_with("test", object_key(digest), str(target))
+    store.client.get_object.assert_not_called()
+    store.client.download_file.side_effect = lambda bucket, key, path: Path(path).write_bytes(
+        b"bad"
+    )
+    with pytest.raises(ValueError, match="SHA-256"):
+        store.stage(digest, target)
+    assert not target.exists()

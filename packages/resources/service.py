@@ -2,6 +2,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from packages.database.models import (
@@ -12,6 +13,8 @@ from packages.database.models import (
     DatasetSnapshot,
     Finding,
     Job,
+    Materialization,
+    MaterializationSource,
     Project,
     SnapshotArtifact,
 )
@@ -23,6 +26,7 @@ from packages.database.repositories import (
     SqlFindingRepository,
     SqlIdempotencyRepository,
     SqlJobRepository,
+    SqlMaterializationRepository,
     SqlProjectRepository,
     SqlSnapshotRepository,
 )
@@ -72,6 +76,7 @@ class DurableResourceService:
         self.audit = SqlAuditRepository(session)
         self.jobs = SqlJobRepository(session)
         self.idempotency = SqlIdempotencyRepository(session)
+        self.materializations = SqlMaterializationRepository(session)
 
     def save_project(
         self, project_id: str, *, name: str | None = None, primary_site: list[str] | None = None
@@ -129,6 +134,109 @@ class DurableResourceService:
         if existing is None:
             self._audit("snapshot.registered", "snapshot", saved.snapshot_id)
         return saved
+
+    def snapshot_artifacts(self, snapshot_id: str) -> dict[str, DatasetObject]:
+        if self.snapshots.get(snapshot_id) is None:
+            raise ResourceNotFoundError("snapshot not found")
+        return self.artifacts.by_snapshot_role(snapshot_id)
+
+    def get_source(self, source_id: str) -> MaterializationSource:
+        value = self.materializations.get_source(source_id)
+        if value is None:
+            raise ResourceNotFoundError("materialization source not found")
+        return value
+
+    def register_source(
+        self,
+        *,
+        snapshot_id: str,
+        artifact: ArtifactRegistration,
+        source_file_id: str | None,
+        source_metadata: dict,
+    ) -> MaterializationSource:
+        if self.snapshots.get(snapshot_id) is None:
+            raise ResourceNotFoundError("snapshot not found")
+        identity = {
+            "snapshot_id": snapshot_id,
+            "sha256": artifact.sha256,
+            "source_file_id": source_file_id,
+            "source_metadata": source_metadata,
+        }
+        source_id = canonical_hash(
+            {
+                "snapshot_id": snapshot_id,
+                "sha256": artifact.sha256,
+                "source_file_id": source_file_id,
+                "kind": source_metadata.get("kind"),
+            }
+        )
+        existing = self.materializations.get_source(source_id)
+        if existing:
+            return existing
+        self.register_artifact(artifact)
+        try:
+            with self.session.begin_nested():
+                value = MaterializationSource(source_id=source_id, **identity)
+                self.session.add(value)
+                self.session.flush()
+        except IntegrityError:
+            existing = self.materializations.get_source(source_id)
+            if existing is None:
+                raise
+            return existing
+        self._audit("materialization.source_registered", "source", source_id)
+        return value
+
+    def get_materialization(self, materialization_id: str) -> Materialization | None:
+        return self.materializations.get(materialization_id)
+
+    def list_materializations(
+        self, snapshot_id: str, modality: str, measurement_type: str = ""
+    ) -> list[Materialization]:
+        return self.materializations.list(snapshot_id, modality, measurement_type)
+
+    def register_materialization(
+        self, *, metadata: dict, output: ArtifactRegistration, diagnostics: ArtifactRegistration
+    ) -> Materialization:
+        source = self.get_source(metadata["source_id"])
+        if source.snapshot_id != metadata["snapshot_id"]:
+            raise ResourceConflictError("source does not belong to snapshot")
+        if metadata["output_sha256"] != output.sha256 or (
+            metadata["diagnostics_sha256"] != diagnostics.sha256
+        ):
+            raise ResourceConflictError("materialization artifact mismatch")
+        existing = self.get_materialization(metadata["materialization_id"])
+        if existing:
+            if existing.logical_sha256 != metadata["logical_sha256"]:
+                raise ResourceConflictError("materialization logical content changed")
+            return existing
+        # Race winner registers its objects and link in the same savepoint.
+        try:
+            with self.session.begin_nested():
+                self.register_artifact(output)
+                self.register_artifact(diagnostics)
+                value = Materialization(**metadata)
+                self.session.add(value)
+                self.session.flush()
+                self.session.add(
+                    SnapshotArtifact(
+                        snapshot_id=value.snapshot_id,
+                        logical_role="materialization:" + value.materialization_id,
+                        sha256=output.sha256,
+                    )
+                )
+                self._audit(
+                    "materialization.completed", "materialization", value.materialization_id
+                )
+                self.session.flush()
+        except IntegrityError:
+            existing = self.get_materialization(metadata["materialization_id"])
+            if existing is None:
+                raise
+            if existing.logical_sha256 != metadata["logical_sha256"]:
+                raise ResourceConflictError("materialization logical content changed") from None
+            return existing
+        return value
 
     def create_cohort(self, request: CohortCreate) -> Cohort:
         if self.snapshots.get(request.snapshot_id) is None:
