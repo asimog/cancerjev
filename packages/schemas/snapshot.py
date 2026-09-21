@@ -8,6 +8,7 @@ class LogicalSnapshotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     project_id: str = Field(pattern=r"^[A-Z0-9]+-[A-Z0-9-]+$")
+    gdc_release: str | None = None
     transformation_version: str = "logical-v1"
     schema_versions: dict[str, str] = Field(default_factory=lambda: {"identity": "1"})
     identity_mapping_version: str = "gdc-identity-v1"

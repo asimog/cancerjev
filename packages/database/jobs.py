@@ -87,27 +87,54 @@ def claim(
     return job
 
 
-def start(session: Session, job_id: uuid.UUID, worker_id: str) -> None:
-    job = _owned(session, job_id, worker_id, allowed_states={"claimed"})
+def start(
+    session: Session, job_id: uuid.UUID, worker_id: str, attempt_token: str | None = None
+) -> None:
+    job = _owned(session, job_id, worker_id, attempt_token, allowed_states={"claimed"})
     job.state = "running"
     job.started_at = datetime.now(UTC)
 
 
-def heartbeat(session: Session, job_id: uuid.UUID, worker_id: str, lease_seconds: int = 60) -> None:
-    job = _owned(session, job_id, worker_id, allowed_states={"claimed", "running"})
+def heartbeat(
+    session: Session,
+    job_id: uuid.UUID,
+    worker_id: str,
+    lease_seconds: int = 60,
+    attempt_token: str | None = None,
+) -> None:
+    job = _owned(
+        session, job_id, worker_id, attempt_token, allowed_states={"claimed", "running"}
+    )
     job.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
 
 
-def succeed(session: Session, job_id: uuid.UUID, worker_id: str, result: dict) -> None:
+def succeed(
+    session: Session,
+    job_id: uuid.UUID,
+    worker_id: str,
+    result: dict,
+    attempt_token: str | None = None,
+) -> None:
     _check_result_size(result)
-    job = _owned(session, job_id, worker_id, allowed_states={"running"})
+    job = _owned(
+        session, job_id, worker_id, attempt_token, allowed_states={"running"}
+    )
     job.state, job.result, job.completed_at = "succeeded", result, datetime.now(UTC)
     job.lease_expires_at = None
     _finish_attempt(session, job, None)
 
 
-def fail(session: Session, job_id: uuid.UUID, worker_id: str, error: str, retryable: bool) -> None:
-    job = _owned(session, job_id, worker_id, allowed_states={"running"})
+def fail(
+    session: Session,
+    job_id: uuid.UUID,
+    worker_id: str,
+    error: str,
+    retryable: bool,
+    attempt_token: str | None = None,
+) -> None:
+    job = _owned(
+        session, job_id, worker_id, attempt_token, allowed_states={"running"}
+    )
     error = error[:8000]
     job.error = error
     job.state = "queued" if retryable and job.attempt_count < job.max_attempts else "failed"
@@ -117,7 +144,14 @@ def fail(session: Session, job_id: uuid.UUID, worker_id: str, error: str, retrya
     _finish_attempt(session, job, error)
 
 
-def _owned(session: Session, job_id: uuid.UUID, worker_id: str, *, allowed_states: set[str]) -> Job:
+def _owned(
+    session: Session,
+    job_id: uuid.UUID,
+    worker_id: str,
+    attempt_token: str | None = None,
+    *,
+    allowed_states: set[str],
+) -> Job:
     job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
     now = datetime.now(UTC)
     if job is None or job.lease_owner != worker_id:
@@ -126,6 +160,19 @@ def _owned(session: Session, job_id: uuid.UUID, worker_id: str, *, allowed_state
         raise LeaseLostError("job lease has expired")
     if job.state not in allowed_states:
         raise JobStateError(f"invalid job transition from {job.state}")
+    if attempt_token is not None:
+        active = session.scalar(
+            select(JobAttempt)
+            .where(
+                JobAttempt.job_id == job.job_id,
+                JobAttempt.attempt_token == attempt_token,
+                JobAttempt.completed_at.is_(None),
+            )
+        )
+        if active is None:
+            raise JobFencingError(
+                "attempt token is stale or does not match active attempt"
+            )
     return job
 
 

@@ -51,7 +51,7 @@ class Outlier(RNA):
 
 class CNVFrequency(Genes):
     amplification_threshold: FiniteFloat = Field(ge=0)
-    deletion_threshold: FiniteFloat = Field(ge=0)
+    deletion_threshold: FiniteFloat
 
     @model_validator(mode="after")
     def ordered_thresholds(self):
@@ -83,16 +83,56 @@ class Engine:
 
 
 ENGINES = {
-    e.name: e for e in (
+    e.name: e
+    for e in (
         Engine("mutation_frequency", MutationGenes, ("mutation",), "case", ("frequency",), 1),
-        Engine("eligible_somatic_mutation_count", MutationCounts, ("mutation",), "sample", ("count",), 1),
+        Engine(
+            "eligible_somatic_mutation_count",
+            MutationCounts,
+            ("mutation",),
+            "sample",
+            ("count",),
+            1,
+        ),
         Engine("mutation_cooccurrence", Pairs, ("mutation",), "case", ("contingency",), 4),
         Engine("cnv_frequency", CNVFrequency, ("cnv",), "sample", ("cnv_frequency",), 1),
-        Engine("rna_outlier", Outlier, ("expression",), "sample", ("outlier",), 3, rna_measurement_required=True),
-        Engine("mutation_rna", MutationRNA, ("mutation", "expression"), "sample", ("association",), 4, rna_measurement_required=True),
-        Engine("cnv_rna", RNA, ("cnv", "expression"), "sample", ("association",), 4, rna_measurement_required=True),
+        Engine(
+            "rna_outlier",
+            Outlier,
+            ("expression",),
+            "sample",
+            ("outlier",),
+            3,
+            rna_measurement_required=True,
+        ),
+        Engine(
+            "mutation_rna",
+            MutationRNA,
+            ("mutation", "expression"),
+            "sample",
+            ("association",),
+            4,
+            rna_measurement_required=True,
+        ),
+        Engine(
+            "cnv_rna",
+            RNA,
+            ("cnv", "expression"),
+            "sample",
+            ("association",),
+            4,
+            rna_measurement_required=True,
+        ),
         Engine("survival", Groups, ("clinical",), "case", ("survival",), 4),
-        Engine("cohort_comparison", Comparison, ("expression",), "sample", ("association",), 4, rna_measurement_required=True),
+        Engine(
+            "cohort_comparison",
+            Comparison,
+            ("expression",),
+            "sample",
+            ("association",),
+            4,
+            rna_measurement_required=True,
+        ),
         Engine("confounder_check", Groups, ("clinical",), "case", ("qc",), 2),
     )
 }

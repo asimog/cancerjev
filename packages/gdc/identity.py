@@ -68,6 +68,10 @@ class FrozenIdentityResolver:
         return frozenset(c.case_id for c in self.cases)
 
     @cached_property
+    def sample_id_set(self):
+        return frozenset(s.sample_id for s in self.samples)
+
+    @cached_property
     def primary_ids(self):
         return frozenset(s.sample_id for s in select_primary_tumor(list(self.samples)).selected)
 

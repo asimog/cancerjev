@@ -6,12 +6,17 @@ def cnv_frequency(
     eligible_ids: tuple[str, ...],
     amplification_threshold: float = 0.2,
     deletion_threshold: float = -0.2,
+    genes: tuple[str, ...] | None = None,
 ) -> dict:
     if not eligible_ids:
-        return {"result": NonEstimableResult(reason="empty_eligible_population")}
+        return {"result": NonEstimableResult(
+            reason="empty_eligible_population"
+        ).model_dump(mode="json")}
     gene_data = {}
     for row in cnv_rows:
         gid = row.get("gene_id")
+        if genes is not None and gid not in genes:
+            continue
         sid = row.get("sample_id")
         if gid and sid in eligible_ids:
             val = row.get("cnv_value")

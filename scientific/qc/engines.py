@@ -1,5 +1,7 @@
 """QC and confounder assessment engines."""
 
+import numpy as np
+
 from packages.schemas.finding import QCResult
 
 
@@ -12,7 +14,11 @@ def confounder_check(
     group_stats = {}
     for label, ids in group_ids.items():
         cases_in_group = [r for r in clinical_rows if r.get("case_id") in ids]
-        ages = [float(r["age_at_diagnosis"]) for r in cases_in_group if r.get("age_at_diagnosis") is not None]
+        ages = [
+            float(r["age_at_diagnosis"])
+            for r in cases_in_group
+            if r.get("age_at_diagnosis") is not None
+        ]
         stages = [str(r["stage"]) for r in cases_in_group if r.get("stage")]
         genders = [str(r["gender"]) for r in cases_in_group if r.get("gender")]
         stage_dist = {}
@@ -37,6 +43,3 @@ def confounder_check(
             flags=[],
         ))
     return {"findings": [f.model_dump(mode="json") for f in findings]}
-
-
-import numpy as np

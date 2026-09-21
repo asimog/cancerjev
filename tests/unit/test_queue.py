@@ -108,8 +108,8 @@ def test_heartbeat_thread_stops(monkeypatch) -> None:
     class Factory:
         begin = staticmethod(transaction)
 
-    monkeypatch.setattr("workers.runtime.heartbeat", lambda *args: calls.append(args))
-    lease = LeaseHeartbeat(Factory(), uuid.uuid4(), "worker-1", 1)
+    monkeypatch.setattr("workers.runtime.heartbeat", lambda *args, **kwargs: calls.append(args))
+    lease = LeaseHeartbeat(Factory(), uuid.uuid4(), "worker-1", 1, attempt_token="test-token")
     lease.start()
     time.sleep(0.4)
     lease.stop()

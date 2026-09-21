@@ -123,8 +123,8 @@ class AnalysisResponse(BaseModel):
     engine_version: str
     purpose: str = "EXPLORATORY"
     parameters: dict[str, Any]
-    expected_input_artifacts: list[str]
     input_materializations: list[AnalysisInput]
+    expected_input_artifacts: list[str]
     state: str
     job_id: uuid.UUID | None
     error: str | None

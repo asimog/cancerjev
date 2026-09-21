@@ -1,4 +1,8 @@
-import json
+"""Transactional application boundary for durable metadata resources
+
+and analysis execution lifecycle.
+"""
+
 import uuid
 from datetime import UTC, datetime
 
@@ -210,7 +214,6 @@ class DurableResourceService:
             if existing.logical_sha256 != metadata["logical_sha256"]:
                 raise ResourceConflictError("materialization logical content changed")
             return existing
-        # Race winner registers its objects and link in the same savepoint.
         try:
             with self.session.begin_nested():
                 self.register_artifact(output)
@@ -305,6 +308,9 @@ class DurableResourceService:
                 max_attempts=3,
             )
         )
+        frozen_inputs = [
+            inp.model_dump(mode="json") for inp in request.input_materializations
+        ]
         analysis = self.analyses.save(
             Analysis(
                 analysis_id=analysis_id,
@@ -314,6 +320,7 @@ class DurableResourceService:
                 engine_version=request.engine_version,
                 purpose=request.purpose,
                 parameters=request.parameters,
+                input_materializations=frozen_inputs,
                 expected_input_artifacts=sorted(set(request.expected_input_artifacts)),
                 state="queued",
                 job_id=job.job_id,
@@ -387,8 +394,20 @@ def _role_hash(artifacts: dict[str, DatasetObject], role: str) -> str | None:
 
 
 def _reject_matrix_payload(value: dict) -> None:
-    if len(json.dumps(value, separators=(",", ":"))) > 65_536:
-        raise ValueError("metadata payload exceeds 64 KiB; store scientific data as an artifact")
-    forbidden = {"matrix", "molecular_matrix", "expression_rows", "mutation_rows", "cnv_rows"}
+    import json as _json
+
+    if len(_json.dumps(value, separators=(",", ":"))) > 65_536:
+        raise ValueError(
+            "metadata payload exceeds 64 KiB; store scientific data as an artifact"
+        )
+    forbidden = {
+        "matrix",
+        "molecular_matrix",
+        "expression_rows",
+        "mutation_rows",
+        "cnv_rows",
+    }
     if forbidden.intersection(value):
-        raise ValueError("genome-scale molecular data must be stored as immutable artifacts")
+        raise ValueError(
+            "genome-scale molecular data must be stored as immutable artifacts"
+        )

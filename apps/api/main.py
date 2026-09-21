@@ -1,4 +1,5 @@
 import json
+import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -37,6 +38,7 @@ from packages.schemas.resources import (
     SnapshotResponse,
 )
 from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotRecord
+from packages.storage.config import StorageSettings
 from packages.storage.snapshots import FileSnapshotRepository
 from workers.ingest.snapshot import LogicalSnapshotService
 
@@ -143,7 +145,7 @@ async def create_logical_snapshot(request: LogicalSnapshotRequest, config: Confi
         snapshot = await LogicalSnapshotService(client=client, repository=repository).create(
             request
         )
-    registrations = _snapshot_artifacts(config.snapshot_root, snapshot)
+    registrations = _snapshot_artifacts(config.snapshot_root, snapshot, config)
     with db.begin():
         DurableResourceService(db).register_snapshot(snapshot, registrations)
     return snapshot
@@ -307,7 +309,7 @@ def create_partition(
     aliquot_ids: list[str],
     db: Db,
 ):
-    """Create discovery/validation partition assignment for a snapshot."""
+    """Create and persist discovery/validation partition assignment for a snapshot."""
     partitioner = DatasetPartitioner()
     discovery, validation = partitioner.assign(
         snapshot_id,
@@ -315,17 +317,43 @@ def create_partition(
         tuple(sample_ids),
         tuple(aliquot_ids),
     )
+    from packages.database.models import PartitionSet
+    existing = db.query(PartitionSet).filter(
+        PartitionSet.snapshot_id == snapshot_id,
+        PartitionSet.assignment_hash == discovery.assignment_hash
+    ).first()
+    if existing is None:
+        partition_set = PartitionSet(
+            partition_set_id=f"PS-{uuid.uuid4().hex[:12]}",
+            snapshot_id=snapshot_id,
+            seed=discovery.seed,
+            split_fraction=discovery.split_fraction,
+            assignment_hash=discovery.assignment_hash,
+            discovery_case_ids=list(discovery.case_ids),
+            validation_case_ids=list(validation.case_ids),
+            discovery_sample_ids=list(discovery.sample_ids),
+            validation_sample_ids=list(validation.sample_ids),
+            discovery_aliquot_ids=list(discovery.aliquot_ids),
+            validation_aliquot_ids=list(validation.aliquot_ids),
+        )
+        db.add(partition_set)
+        db.flush()
     return {
+        "partition_set_id": partition_set.partition_set_id,
         "discovery": {
             "partition_id": discovery.partition_id,
             "partition": "DISCOVERY",
             "case_ids": discovery.case_ids,
+            "sample_ids": discovery.sample_ids,
+            "aliquot_ids": discovery.aliquot_ids,
             "assignment_hash": discovery.assignment_hash,
         },
         "validation": {
             "partition_id": validation.partition_id,
             "partition": "VALIDATION",
             "case_ids": validation.case_ids,
+            "sample_ids": validation.sample_ids,
+            "aliquot_ids": validation.aliquot_ids,
             "assignment_hash": validation.assignment_hash,
         },
     }
@@ -339,8 +367,6 @@ async def slice_bam(
 ):
     """Slice an open-access BAM by gene or genomic region. No auth required."""
     client = GDCBAMSlicingClient()
-    """Slice an open-access BAM by gene or genomic region."""
-    client = GDCBAMSlicingClient()
     try:
         if gene:
             data = await client.slice_by_gene(file_uuid, [gene])
@@ -353,9 +379,15 @@ async def slice_bam(
     return Response(content=data, media_type="application/octet-stream")
 
 
-def _snapshot_artifacts(root: Path, snapshot: SnapshotRecord) -> list[ArtifactRegistration]:
+def _snapshot_artifacts(
+    root: Path, snapshot: SnapshotRecord, config: Settings | None = None
+) -> list[ArtifactRegistration]:
     directory = root / snapshot.project_id / snapshot.snapshot_id
     marker = json.loads((directory / "COMPLETE.json").read_text(encoding="utf-8"))
+    storage_settings = (
+        config.storage_settings if config else StorageSettings()
+    )
+    storage_backend = storage_settings.object_backend
     roles = {
         "manifest.tsv": "manifest",
         "coverage.parquet": "coverage",
@@ -373,7 +405,7 @@ def _snapshot_artifacts(root: Path, snapshot: SnapshotRecord) -> list[ArtifactRe
                 size=path.stat().st_size,
                 media_type=_media_type(name),
                 logical_role=roles.get(name, name.removesuffix(".parquet").removesuffix(".json")),
-                storage_backend="filesystem",
+                storage_backend=storage_backend,
                 storage_key=f"{snapshot.project_id}/{snapshot.snapshot_id}/{name}",
                 parser_schema_version="identity-v1" if name.endswith(".parquet") else None,
                 row_count=pq.ParquetFile(path).metadata.num_rows

@@ -1,31 +1,16 @@
-"""Tests for CJ-11 through CJ-15: job fencing, acquisition, artifact-backed analysis, engines, partitions."""
+"""Tests for CJ-11 through CJ-15: job fencing, acquisition,
+artifact-backed analysis, engines, partitions.
+"""
 
-from datetime import UTC, datetime, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from packages.database.jobs import (
     MAX_PAYLOAD_BYTES,
-    MAX_RESULT_BYTES,
-    LeaseLostError,
-    claim,
     enqueue,
-    fail,
-    reaper,
-    start,
-    succeed,
 )
 from packages.partition import DatasetPartitioner, Partition, assert_partition_access
-from packages.schemas.finding import (
-    CNVFrequencyResult,
-    ContingencyResult,
-    Eligibility,
-    FrequencyResult,
-    NonEstimableResult,
-    OutlierResult,
-)
-
 
 # =============================================================================
 # CJ-11: Job fencing and reaper
@@ -71,9 +56,17 @@ class TestAcquisition:
     def test_manifest_generation(self, tmp_path):
         from packages.gdc.manifest import generate_manifest
         from packages.schemas.identity import FileRecord
-        files = [FileRecord(file_id="test-uuid", file_name="test.maf", file_size=100, md5sum="a"*32, access="open")]
+        files = [
+            FileRecord(
+                file_id="test-uuid",
+                file_name="test.maf",
+                file_size=100,
+                md5sum="a" * 32,
+                access="open",
+            )
+        ]
         manifest = generate_manifest(files)
-        assert isinstance(manifest, bytes) or isinstance(manifest, str)
+        assert isinstance(manifest, (bytes, str))
         assert "test-uuid" in (manifest.decode() if isinstance(manifest, bytes) else manifest)
 
 
@@ -86,7 +79,11 @@ class TestInputResolution:
 
     def test_resolve_engine_validates_params(self):
         from packages.statistics.registry import resolve_engine
-        engine, params = resolve_engine("mutation_frequency", "1", {"materialization_ids": ("m1",), "genes": ("EGFR",)})
+        engine, params = resolve_engine(
+            "mutation_frequency",
+            "1",
+            {"materialization_ids": ("m1",), "genes": ("EGFR",)},
+        )
         assert engine.name == "mutation_frequency"
 
     def test_resolve_engine_rejects_unknown(self):
@@ -132,7 +129,12 @@ class TestMutationEngines:
             {"case_id": f"case{i}", "gene_id": "GENE2"}
             for i in range(5, 15)
         ]
-        result = mutation_cooccurrence(mutations, tuple(f"case{i}" for i in range(20)), "GENE1", "GENE2")
+        result = mutation_cooccurrence(
+            mutations,
+            tuple(f"case{i}" for i in range(20)),
+            "GENE1",
+            "GENE2",
+        )
         assert "findings" in result or "result" in result
 
 

@@ -158,8 +158,11 @@ class Analysis(Base):
     purpose: Mapped[str] = mapped_column(String(30), default="EXPLORATORY")
     state: Mapped[str] = mapped_column(String(30))
     parameters: Mapped[dict] = mapped_column(JSONB)
+    input_materializations: Mapped[list[dict]] = mapped_column(JSONB, default=list)
+    execution_manifest_hash: Mapped[str | None] = mapped_column(String(71))
     expected_input_artifacts: Mapped[list[str]] = mapped_column(JSONB, default=list)
     job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.job_id"), unique=True)
+    partition_set_id: Mapped[str | None] = mapped_column(String(100))
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -273,4 +276,172 @@ class IdempotencyRecord(Base):
     request_hash: Mapped[str] = mapped_column(String(71))
     resource_type: Mapped[str] = mapped_column(String(100))
     resource_id: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SearchRun(Base):
+    __tablename__ = "search_runs"
+    search_run_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("dataset_snapshots.snapshot_id"))
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("cohorts.cohort_id"))
+    purpose: Mapped[str] = mapped_column(String(30), default="EXPLORATORY")
+    gdc_api_version: Mapped[str | None] = mapped_column(String(100))
+    gdc_release: Mapped[str | None] = mapped_column(String(100))
+    search_policy_version: Mapped[str] = mapped_column(String(40))
+    search_families: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    engines_used: Mapped[list[dict]] = mapped_column(JSONB, default=list)
+    state: Mapped[str] = mapped_column(String(30), default="running")
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index("ix_search_snapshot", "snapshot_id"),
+        Index("ix_search_cohort", "cohort_id"),
+    )
+
+
+class MultipleTestingFamily(Base):
+    __tablename__ = "multiple_testing_families"
+    family_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    search_run_id: Mapped[str] = mapped_column(ForeignKey("search_runs.search_run_id"))
+    family_name: Mapped[str] = mapped_column(String(100))
+    correction_method: Mapped[str] = mapped_column(String(30))
+    n_planned: Mapped[int] = mapped_column(Integer, default=0)
+    n_tested: Mapped[int] = mapped_column(Integer, default=0)
+    n_excluded: Mapped[int] = mapped_column(Integer, default=0)
+    n_significant_at_005: Mapped[int | None] = mapped_column(Integer)
+    n_significant_at_01: Mapped[int | None] = mapped_column(Integer)
+    correction_version: Mapped[str] = mapped_column(String(40), default="bh-v1")
+    family_hash: Mapped[str] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CandidateObservation(Base):
+    __tablename__ = "candidate_observations"
+    candidate_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    search_run_id: Mapped[str] = mapped_column(ForeignKey("search_runs.search_run_id"))
+    family: Mapped[str] = mapped_column(String(40))
+    observation_type: Mapped[str] = mapped_column(String(40))
+    gene_id: Mapped[str | None] = mapped_column(String(100))
+    gene_symbol: Mapped[str | None] = mapped_column(String(100))
+    engine: Mapped[str] = mapped_column(String(100))
+    engine_version: Mapped[str] = mapped_column(String(40))
+    parameters: Mapped[dict] = mapped_column(JSONB, default=dict)
+    purpose: Mapped[str] = mapped_column(String(30), default="EXPLORATORY")
+    snapshot_hash: Mapped[str] = mapped_column(String(71))
+    cohort_hash: Mapped[str] = mapped_column(String(71))
+    materialization_hashes: Mapped[dict] = mapped_column(JSONB, default=dict)
+    eligibility_hash: Mapped[str] = mapped_column(String(71))
+    n: Mapped[int] = mapped_column(Integer, default=0)
+    effect: Mapped[float | None] = mapped_column(nullable=True)
+    ci_lower: Mapped[float | None] = mapped_column(nullable=True)
+    ci_upper: Mapped[float | None] = mapped_column(nullable=True)
+    p_value: Mapped[float | None] = mapped_column(nullable=True)
+    q_value: Mapped[float | None] = mapped_column(nullable=True)
+    missingness: Mapped[float] = mapped_column(nullable=True, default=0.0)
+    multiple_testing_family_id: Mapped[str | None] = mapped_column(
+        ForeignKey("multiple_testing_families.family_id")
+    )
+    multiple_testing_correction: Mapped[str | None] = mapped_column(String(30))
+    result_kind: Mapped[str] = mapped_column(String(30), default="estimable")
+    result: Mapped[dict] = mapped_column(JSONB, default=dict)
+    eligible_n: Mapped[int] = mapped_column(Integer, default=0)
+    max_n: Mapped[int] = mapped_column(Integer, default=0)
+    flags: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    excluded: Mapped[dict] = mapped_column(JSONB, default=dict)
+    identity_hash: Mapped[str] = mapped_column(String(71))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (
+        Index("ix_candidate_search", "search_run_id"),
+        Index("ix_candidate_family", "multiple_testing_family_id"),
+        Index("ix_candidate_gene", "gene_id"),
+    )
+
+
+class PartitionSet(Base):
+    __tablename__ = "partition_sets"
+    partition_set_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("dataset_snapshots.snapshot_id"))
+    seed: Mapped[str] = mapped_column(String(100))
+    split_fraction: Mapped[float]
+    assignment_hash: Mapped[str] = mapped_column(String(71))
+    discovery_case_ids: Mapped[list] = mapped_column(JSONB)
+    validation_case_ids: Mapped[list] = mapped_column(JSONB)
+    discovery_sample_ids: Mapped[list] = mapped_column(JSONB)
+    validation_sample_ids: Mapped[list] = mapped_column(JSONB)
+    discovery_aliquot_ids: Mapped[list] = mapped_column(JSONB)
+    validation_aliquot_ids: Mapped[list] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_partition_snapshot", "snapshot_id"),
+        CheckConstraint(
+            "NOT (discovery_case_ids && validation_case_ids)",
+            name="ck_partition_case_disjoint",
+        ),
+    )
+
+
+# CJ-17: JevService
+class JevEvaluation(Base):
+    __tablename__ = "jev_evaluations"
+    evaluation_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(50))
+    subject_type: Mapped[str] = mapped_column(String(50))
+    subject_id: Mapped[str] = mapped_column(String(100))
+    state_schema: Mapped[str] = mapped_column(String(50))
+    state_schema_version: Mapped[str] = mapped_column(String(40))
+    state_hash: Mapped[str] = mapped_column(String(71))
+    question_set_id: Mapped[str] = mapped_column(String(100))
+    question_set_version: Mapped[str] = mapped_column(String(40))
+    policy_version: Mapped[str] = mapped_column(String(40))
+    requested_model: Mapped[str] = mapped_column(String(100))
+    resolved_model: Mapped[str] = mapped_column(String(100))
+    sdk_version: Mapped[str] = mapped_column(String(40))
+    answers: Mapped[dict] = mapped_column(JSONB, default=dict)
+    usage_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    usage_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(30), default="completed")
+    error: Mapped[str | None] = mapped_column(Text)
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# CJ-19: Discovery
+class DiscoveryRun(Base):
+    __tablename__ = "discovery_runs"
+    discovery_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("candidate_observations.candidate_id"))
+    search_run_id: Mapped[str] = mapped_column(ForeignKey("search_runs.search_run_id"))
+    state: Mapped[str] = mapped_column(String(30), default="running")
+    expansion_count: Mapped[int] = mapped_column(Integer, default=0)
+    jev_evaluation_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    routing_decisions: Mapped[list[dict]] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index("ix_discovery_candidate", "candidate_id"),)
+
+
+# CJ-20: Reproduction + DiscoveryTrace
+class FindingReproduction(Base):
+    __tablename__ = "finding_reproductions"
+    reproduction_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    finding_id: Mapped[str] = mapped_column(ForeignKey("findings.finding_id"))
+    # IDENTICAL, MISMATCH, FAILED, UNAVAILABLE_VERSION
+    status: Mapped[str] = mapped_column(String(30))
+    source_hashes: Mapped[dict] = mapped_column(JSONB, default=dict)
+    mismatched_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
+    engine_available: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscoveryTrace(Base):
+    __tablename__ = "discovery_trace"
+    trace_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    finding_id: Mapped[str] = mapped_column(ForeignKey("findings.finding_id"))
+    search_run_id: Mapped[str | None] = mapped_column(ForeignKey("search_runs.search_run_id"))
+    candidate_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    jev_evaluation_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    expansion_recipe_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    routing_summary: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
