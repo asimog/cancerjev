@@ -1,4 +1,15 @@
-"""Safe wrapper around the official GDC Data Transfer Tool."""
+"""Quarantined GDC Data Transfer Tool boundary.
+
+CJ-R00 containment decision: the complete-file download wrapper is removed
+because it could transfer a complete BAM with no metadata-first plan, size
+bound, or BAM denial. Production acquisition registers already-acquired
+bytes through the trusted source boundary (`MaterializationService`),
+which verifies frozen snapshot metadata, checksums, and sizes. The full
+metadata-first acquisition planner and bounded slicing arrive with CJ-R04.
+
+The capability probe remains so R04 can verify the official binary, and
+`verify_file` remains the checksum/size authority for registered bytes.
+"""
 
 import hashlib
 import shutil
@@ -25,6 +36,8 @@ class TransferResult:
 
 
 class GDCTransfer:
+    """Official-binary capability probe only; no download path exists."""
+
     def __init__(self, binary: str = "gdc-client"):
         self.binary = binary
 
@@ -38,22 +51,6 @@ class GDCTransfer:
         if result.returncode:
             raise GDCClientUnavailable(result.stderr.strip() or "version check failed")
         return result.stdout.strip() or result.stderr.strip()
-
-    def download(self, manifest: Path, destination: Path) -> subprocess.CompletedProcess[str]:
-        manifest, destination = manifest.resolve(), destination.resolve()
-        if not manifest.is_file():
-            raise FileNotFoundError(manifest)
-        destination.mkdir(parents=True, exist_ok=True)
-        # Argument vector is deliberate: never use a shell or interpolate manifest content.
-        result = subprocess.run(
-            [self.binary, "download", "--resume", "-m", str(manifest), "-d", str(destination)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode:
-            raise RuntimeError(f"gdc-client failed ({result.returncode}): {result.stderr}")
-        return result
 
 
 def verify_file(path: Path, expected_md5: str, expected_size: int | None = None) -> TransferResult:

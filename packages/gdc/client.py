@@ -11,7 +11,13 @@ from uuid import UUID
 import httpx
 
 from packages.gdc.filters import open_project_files
-from packages.gdc.policy import GDC_API, official_api, open_filter, require_open
+from packages.gdc.policy import (
+    GDC_API,
+    GDCUnavailableAccess,
+    official_api,
+    open_filter,
+    require_open,
+)
 from packages.schemas.snapshot import SnapshotRecord
 
 log = logging.getLogger(__name__)
@@ -154,6 +160,13 @@ class GDCClient:
                     raise GDCError("GDC transport failed", retryable=True) from exc
             else:
                 if response.status_code not in self.RETRYABLE:
+                    if response.status_code in (401, 403):
+                        # Authorization outcomes are permanent public-access
+                        # failures; never retry and never seek credentials.
+                        raise GDCUnavailableAccess(
+                            "GDC authorization failure; only anonymous public open access"
+                            " is supported"
+                        )
                     if response.is_error or response.is_redirect:
                         raise GDCError(
                             f"GDC returned HTTP {response.status_code}", status=response.status_code
