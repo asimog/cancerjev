@@ -1,6 +1,6 @@
 # CJ-R00 — Restored-main readiness gate
 
-**Status:** required before CJ-R01
+**Status:** completed and verified 2026-09-22; CJ-R01 may begin separately
 
 **Baseline:** `2bf6c68d93741b9974f46983e0a35c691d69c1f1`
 
@@ -548,17 +548,17 @@ be safe enough for R33 to operationalize later.
 
 ## Reviewer checklist
 
-- [ ] Every audit blocker has a failing-before/passing-after test.
-- [ ] No discarded branch implementation was copied without line-by-line review.
-- [ ] Exactly one module owns Analysis/Finding publication.
-- [ ] Worker and API cannot supply authoritative scientific identity fields.
-- [ ] Attempt token participates in every mutating job transition.
-- [ ] Snapshot v2 includes complete normalized biological/access state.
-- [ ] Legacy resources remain readable and are not falsely upgraded.
-- [ ] No complete BAM or GDC credential route exists.
-- [ ] Wheel, frontend, database, File/S3, image, and Compose gates actually ran.
-- [ ] Full diff contains no unrelated refactor, dependency, generated output, or secret.
-- [ ] README/architecture describe only verified post-R00 behavior.
+- [x] Every audit blocker has a failing-before/passing-after test.
+- [x] No discarded branch implementation was copied without line-by-line review.
+- [x] Exactly one module owns Analysis/Finding publication.
+- [x] Worker and API cannot supply authoritative scientific identity fields.
+- [x] Attempt token participates in every mutating job transition.
+- [x] Snapshot v2 includes complete normalized biological/access state.
+- [x] Legacy resources remain readable and are not falsely upgraded.
+- [x] No complete BAM or GDC credential route exists.
+- [x] Wheel, frontend, database, File/S3, image, and Compose gates actually ran.
+- [x] Full diff contains no unrelated refactor, dependency, generated output, or secret.
+- [x] README/architecture describe only verified post-R00 behavior.
 
 ## Non-goals
 

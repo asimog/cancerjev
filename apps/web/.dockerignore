@@ -1,0 +1,9 @@
+.git
+.next
+node_modules
+playwright-report
+test-results
+.env
+.env.*
+tsconfig.tsbuildinfo
+npm-debug.log*

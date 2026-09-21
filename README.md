@@ -15,38 +15,37 @@ status.
 
 ## Repository status
 
-The canonical baseline is `main` at `2bf6c68d93741b9974f46983e0a35c691d69c1f1`
-(the restored PR09 hardening state). This repository contains a strong public-data
-and durable-resource foundation, but it is **not yet ready to begin CJ-R01–CJ-R33**.
-[CJ-R00](docs/plan/cjs/CJ-R00.md) is the mandatory readiness gate.
+The restored PR09 baseline is `2bf6c68d93741b9974f46983e0a35c691d69c1f1`.
+[CJ-R00](docs/plan/cjs/CJ-R00.md) has repaired and verified that foundation; CJ-R01
+is the next planned milestone and has not begun.
 
-Implemented and verified in the baseline:
+Implemented and verified through CJ-R00:
 
 - official GDC-host enforcement, `access=open` filtering, bounded responses, and
   rejection of GDC authentication headers;
 - versioned snapshots, frozen identity artifacts, verified source registration,
   canonical public mutation/RNA/CNV/clinical materialization, File/S3 CAS, and
   PostgreSQL resource metadata;
-- immutable source/materialization records, cohort membership checks, analysis
-  input lineage, audit events, durable jobs, leases, and idempotency;
-- initial resource APIs, project/snapshot web screens, deterministic statistical
-  primitives, migrations, Docker Compose, and 128 passing tests with PostgreSQL.
+- snapshot identity v2 with complete normalized biological identity and deterministic
+  rejection of conflicting duplicate records;
+- immutable source/materialization/cohort/Finding records, fenced job attempts,
+  terminal recovery, analysis input lineage, audit events, and idempotency;
+- artifact-only `cnv_rna` execution from frozen verified inputs through the production
+  worker to one server-identified immutable Finding;
+- server-owned scientific/result identity, finite-value eligibility, duplicate
+  molecular-key rejection, and exact analyzed-population accounting;
+- terminal public-access denial and quarantine of complete-file transfer paths;
+- reproducible wheel, frontend, image, and isolated Compose gates with split CI jobs.
 
-Important current limitations:
+Important current limitations after CJ-R00:
 
-- durable `run_analysis_from_artifacts` jobs are queued but the statistics worker
-  does not claim them;
-- the built wheel omits `scientific/`, while source-tree and container layouts hide
-  that packaging defect;
-- snapshot identity does not hash complete case/sample/aliquot metadata and silently
-  collapses conflicting duplicate records;
-- Finding identity omits declared input hashes and other scientific identity fields;
 - no application authentication/authorization, validation firewall, Jev service,
   SearchRun, ResearchState, evidence graph, or research-agent loop exists;
-- the existing GDC transfer wrapper can request complete public files; the canonical
-  minimal-transfer planner and bounded open-BAM slicing policy do not exist;
-- frontend lint is interactive, dependency audit reports known vulnerabilities,
-  and Compose host ports are not isolated.
+- the canonical minimal-transfer planner and bounded open-BAM slicing contract remain
+  assigned to CJ-R04; current code fails closed on complete BAM and quarantines the
+  generic complete-file transfer operation;
+- only the narrow existing `cnv_rna` artifact execution contract is registered;
+- Compose remains a local-development topology, not a production deployment.
 
 These are planned facts, not deployed capabilities. See the
 [architecture](ARCHITECTURE.md), [product plan](docs/plan/PRODUCT_PLAN.md), and
@@ -64,7 +63,8 @@ DatasetSnapshot -> verified public source -> canonical Materialization
                                |
                          Analysis request
                                |
-                 [CJ-R00 must connect execution]
+                 fenced artifact execution
+                               |
                                v
 Finding -> Search/Jev/native research loop -> validation -> researcher handoff
 ```
@@ -107,37 +107,40 @@ python -m pytest -q
 
 cd apps/web
 npm ci
+npm run lint
 npm run typecheck
 npm run build
+npm audit --omit=dev
+npx playwright install chromium
+npm run test:browser
 ```
 
 For database tests, point `CANCERJEV_DATABASE_URL` at a disposable PostgreSQL
 database; the suite recreates its public schema. See
 [Getting started](docs/getting-started.md) for the safe procedure.
 
-`docker compose up --build` is currently a diagnostic path, not a readiness claim:
-CJ-R00 must add build-context exclusions and configurable host ports. Local Compose
-credentials are development-only values.
+`docker compose up --build -d --wait` starts the verified local development topology.
+Host bindings default to loopback and ports can be isolated with
+`CANCERJEV_API_PORT`, `CANCERJEV_WEB_PORT`, `CANCERJEV_MINIO_PORT`, and
+`CANCERJEV_MINIO_CONSOLE_PORT`. Local Compose credentials are development-only.
 
-## Verification baseline (2026-09-22)
+## CJ-R00 verification (2026-09-22)
 
-Executed against restored `main`:
+- Python 3.12.14 with disposable PostgreSQL 16: 176 tests passed; 2 dependency
+  deprecation warnings.
+- Ruff 0.16.8 passed; Alembic reported the single `0005` head.
+- Isolated sdist/wheel build and outside-source-tree runtime imports passed.
+- Node 24.13.1/npm 11.8.0: clean install, ESLint, typecheck, Next 16.3.5 production
+  build, and production dependency audit passed with zero vulnerabilities.
+- One focused Chromium researcher-journey smoke passed with provider I/O intercepted.
+- Docker 29.8.0 / Compose 5.5.1 built the images and ran two simultaneous isolated
+  projects; both passed API/web health, migration, workers, and cross-service MinIO
+  CAS verification.
 
-- `python -m ruff check .` — passed.
-- `python -m pytest -q` without PostgreSQL — 100 passed, 28 skipped.
-- full suite with disposable PostgreSQL 16 — 128 passed, 344 warnings.
-- `python -m alembic heads` — one head, `0004`.
-- frontend typecheck and production build — passed.
-- frontend lint — failed because `next lint` starts an interactive setup prompt.
-- `npm audit --omit=dev` — failed with one moderate and one high advisory in the
-  installed Next/PostCSS dependency path.
-- wheel inspection — failed: `scientific/` is absent.
-- `docker compose config --quiet` — passed.
-- isolated Compose startup — blocked by hard-coded host port `9000` already in use.
-
-This evidence is recorded in [CJ-R00](docs/plan/cjs/CJ-R00.md). The Python 3.14
-audit environment produced pytest-asyncio deprecation warnings; supported CI remains
-Python 3.12 until the compatibility matrix is deliberately expanded.
+Full evidence and known limitations are recorded in
+[the CJ-R00 change record](docs/changes/cj-r00-readiness.md). Python 3.14 also passed
+all 176 tests but emitted the previously known asyncio warnings and a Windows pytest
+temporary-directory cleanup warning; supported CI remains Python 3.12.
 
 ## Safety and scope
 

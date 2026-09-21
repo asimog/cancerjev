@@ -1,9 +1,9 @@
 # Researcher guide
 
 The current UI lists live public TCGA projects and can create a frozen logical
-snapshot. The API also exposes durable resource operations, but artifact-backed
-analysis execution is disconnected in the restored baseline. Do not interpret a
-queued Analysis as a completed scientific result.
+snapshot. The API also exposes durable resource operations. Supported artifact-backed
+analyses now execute through a fenced worker, but a queued or running Analysis is not
+a completed scientific result; use only the immutable published Finding.
 
 Until CJ-R26, use the UI only for source exploration and snapshot creation. Every
 result must be read with access, coverage, eligible population, missingness, method,

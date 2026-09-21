@@ -266,7 +266,17 @@ class SqlFindingRepository(_Repository):
             if existing.result_hash != finding.result_hash:
                 raise ValueError("finding ID already exists with another result hash")
             return existing
-        return self._save(finding)
+        try:
+            with self.session.begin_nested():
+                return self._save(finding)
+        except IntegrityError:
+            # A concurrent attempt published the same authoritative identity.
+            existing = self.get(finding.finding_id)
+            if existing is None:
+                raise
+            if existing.result_hash != finding.result_hash:
+                raise ValueError("finding ID already exists with another result hash") from None
+            return existing
 
 
 class SqlAuditRepository(_Repository):

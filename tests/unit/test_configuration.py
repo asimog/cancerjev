@@ -1,5 +1,6 @@
 from alembic.config import Config
 
+from apps.api.config import Settings
 from packages.database.config import resolve_database_url
 
 
@@ -19,3 +20,11 @@ def test_database_url_is_required_without_runtime_or_tooling_value(monkeypatch) 
         assert "required" in str(exc)
     else:
         raise AssertionError("missing database configuration was accepted")
+
+
+def test_web_origin_is_configurable_for_isolated_local_compose(monkeypatch) -> None:
+    monkeypatch.setenv("CANCERJEV_WEB_ORIGIN", "http://localhost:23000")
+
+    configured = Settings(_env_file=None)
+
+    assert str(configured.web_origin).rstrip("/") == "http://localhost:23000"

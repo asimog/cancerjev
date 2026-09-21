@@ -93,8 +93,8 @@ from sqlalchemy import text
 from packages.database.session import session_factory
 from packages.database.config import resolve_database_url
 with session_factory(resolve_database_url())() as session:
-    assert session.scalar(text('SELECT version_num FROM alembic_version')) == '0004'
-for url in ('http://localhost:8000/health', 'http://web:3000'):
+    assert session.scalar(text('SELECT version_num FROM alembic_version')) == '0005'
+for url in ('http://localhost:8000/health', 'http://web:3000/health'):
     with urllib.request.urlopen(url, timeout=20) as response:
         assert response.status == 200
 print('healthy')
@@ -117,7 +117,7 @@ print('healthy')
             timeout=30,
         ).stdout.strip()
         assert health == "healthy", f"{service} healthcheck: {health}"
-    print("PASS: API/web health, migration 0004, and all 9 cross-service MinIO CAS reads")
+    print("PASS: API/web health, migration 0005, and all 9 cross-service MinIO CAS reads")
 
 
 if __name__ == "__main__":

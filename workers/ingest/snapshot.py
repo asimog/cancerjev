@@ -10,7 +10,11 @@ from packages.gdc.manifest import generate_manifest
 from packages.gdc.mappings import map_file_hit
 from packages.gdc.policy import SOURCE_POLICY_VERSION, official_api, require_open
 from packages.provenance.hashing import canonical_hash
+from packages.schemas.identity import unique_records
 from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotObject, SnapshotRecord
+
+#: v2 hashes complete normalized case/sample/aliquot records; v1 hashed ID lists.
+SNAPSHOT_IDENTITY_VERSION = 2
 
 
 class SnapshotRepository(Protocol):
@@ -43,26 +47,29 @@ class LogicalSnapshotService:
         mapped = [map_file_hit(hit) for hit in hits]
         files = [item[0] for item in mapped]
 
-        def unique(index: int, key: str) -> list:
-            values = [value for item in mapped for value in item[index]]
-            return sorted(
-                {getattr(value, key): value for value in values}.values(),
-                key=lambda value: getattr(value, key),
-            )
-
-        cases, samples = unique(1, "case_id"), unique(2, "sample_id")
-        aliquots, links = unique(3, "aliquot_id"), unique(4, "file_id")
-        # Links can share file IDs; de-duplicate on the full identity instead.
-        links = sorted(
-            {
-                (v.file_id, v.case_id, v.sample_id, v.aliquot_id): v
-                for item in mapped
-                for v in item[4]
-            }.values(),
-            key=lambda v: (v.file_id, v.case_id, v.sample_id or "", v.aliquot_id or ""),
+        # Conflicting duplicate biological records must fail deterministically;
+        # exact duplicates collapse. Records are order-canonical by identity key.
+        cases = unique_records(
+            (record for item in mapped for record in item[1]), lambda r: r.case_id, label="case"
+        )
+        samples = unique_records(
+            (record for item in mapped for record in item[2]),
+            lambda r: r.sample_id,
+            label="sample",
+        )
+        aliquots = unique_records(
+            (record for item in mapped for record in item[3]),
+            lambda r: r.aliquot_id,
+            label="aliquot",
+        )
+        links = unique_records(
+            (record for item in mapped for record in item[4]),
+            lambda r: (r.file_id, r.case_id, r.sample_id or "", r.aliquot_id or ""),
+            label="file_identity_link",
         )
         release_identity = status_before["data_release"]
         identity = {
+            "identity_version": SNAPSHOT_IDENTITY_VERSION,
             "project_id": request.project_id,
             "gdc_release": release_identity,
             "source_policy_version": SOURCE_POLICY_VERSION,
@@ -79,9 +86,9 @@ class LogicalSnapshotService:
             "normalization_policy_version": request.normalization_policy_version,
             "objects": [item.model_dump(mode="json") for item in objects],
             "file_identity_links": [item.model_dump(mode="json") for item in links],
-            "case_ids": [item.case_id for item in cases],
-            "sample_ids": [item.sample_id for item in samples],
-            "aliquot_ids": [item.aliquot_id for item in aliquots],
+            "cases": [item.model_dump(mode="json") for item in cases],
+            "samples": [item.model_dump(mode="json") for item in samples],
+            "aliquots": [item.model_dump(mode="json") for item in aliquots],
         }
         digest = canonical_hash(identity)
         snapshot = SnapshotRecord(
@@ -92,10 +99,11 @@ class LogicalSnapshotService:
             gdc_release=release_identity,
             query=query,
             transformation_version=request.transformation_version,
+            identity_version=SNAPSHOT_IDENTITY_VERSION,
             objects=objects,
-            case_ids=tuple(identity["case_ids"]),
-            sample_ids=tuple(identity["sample_ids"]),
-            aliquot_ids=tuple(identity["aliquot_ids"]),
+            case_ids=tuple(record.case_id for record in cases),
+            sample_ids=tuple(record.sample_id for record in samples),
+            aliquot_ids=tuple(record.aliquot_id for record in aliquots),
             requested_fields=requested_fields,
             canonical_schema_versions=request.schema_versions,
             normalization_metadata={"policy_version": request.normalization_policy_version},

@@ -1,3 +1,3 @@
-from scientific.crossmodal.analysis import analyze_cnv_rna
+from scientific.crossmodal.analysis import EngineContext, analyze_cnv_rna
 
-__all__ = ["analyze_cnv_rna"]
+__all__ = ["EngineContext", "analyze_cnv_rna"]

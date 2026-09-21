@@ -1,7 +1,7 @@
 # CancerJev Architecture
 
-This is the canonical architecture map for the restored `main` baseline and the
-CJ-R00–CJ-R33 implementation program. It separates current truth from target
+This is the canonical architecture map after the CJ-R00 readiness gate and for the
+CJ-R01–CJ-R33 implementation program. It separates current truth from target
 architecture. Planned names are not claims that code exists.
 
 ## 1. Architectural status
@@ -10,21 +10,21 @@ Baseline: `2bf6c68d93741b9974f46983e0a35c691d69c1f1`.
 
 | Boundary | Current owner | Current truth | Target CJ |
 | --- | --- | --- | --- |
-| Public GDC policy | `packages/gdc` | Official host, open filtering, auth-header rejection | R00, R02, R04 |
-| Frozen snapshots | `workers/ingest`, `packages/storage`, `packages/resources` | Published artifacts and metadata; identity gaps remain | R00, R02 |
+| Public GDC policy | `packages/gdc` | Official host, open-only filtering, terminal access denial, complete-BAM denial, transfer quarantine | R02, R04 |
+| Frozen snapshots | `workers/ingest`, `packages/storage`, `packages/resources` | Published artifacts and complete normalized identity v2; legacy v1 remains readable | R02 |
 | Materialization | `packages/gdc`, `packages/resources`, ingest worker | Public processed mutation/RNA/CNV/clinical parsers | R04, R08 |
-| Durable resources | `packages/resources`, `packages/database` | Project/snapshot/cohort/analysis/finding/job records | R00–R06 |
-| Scientific execution | `packages/statistics`, `scientific`, statistics worker | Primitives and legacy inline handler; artifact job disconnected | R00, R05, R08–R12 |
+| Durable resources | `packages/resources`, `packages/database` | Immutable scientific records, fenced job attempts, terminal recovery, and publication transactions | R01–R06 |
+| Scientific execution | `packages/statistics`, `scientific`, statistics worker | Frozen-artifact `cnv_rna` path connected through server-owned Finding publication | R05, R08–R12 |
 | Runtime isolation and quotas | none | No end-user login; runtime isolation and quotas are planned without user accounts | R00, R06 |
 | Validation firewall | none | Not implemented | R07, R24–R25 |
 | Jev | none | No SDK, adapter, service, or semantic ledger | R13–R15 |
 | Research loop | none | No claims, evidence graph, state, actions, or native agent | R16–R25 |
-| Researcher product | minimal `apps/web` | Project list and snapshot creation only | R26–R27 |
+| Researcher product | minimal `apps/web` | Project list and snapshot creation only; reproducible lint/build/browser gate | R26–R27 |
 | Distributed network | none | External client is intentionally absent | R28–R32 |
 | Production release | Compose development stack | No production release evidence | R33 |
 
-CJ-R00 is the entry gate. It repairs the current foundation without introducing the
-new product subsystems assigned to later CJs.
+CJ-R00 repaired the entry foundation without introducing the new product subsystems
+assigned to later CJs.
 
 ## 2. HyperFlow boxes and ownership
 
@@ -137,12 +137,15 @@ GDC /status + /files
   -> canonical Parquet + diagnostics + Materialization
   -> frozen Cohort
   -> Analysis + queued run_analysis_from_artifacts Job
-  -X-> statistics worker (job type not claimed in current baseline)
+  -> fenced statistics-worker attempt
+  -> AnalysisExecutionService resolves and verifies frozen artifacts
+  -> registered deterministic cnv_rna engine
+  -> server-owned identity and immutable Finding publication
+  -> Analysis and Job terminal success
 ```
 
-The broken final connection is a verified audit fact. Existing inline
-`run_analysis`/`reproduce_finding` handlers are legacy paths and must not be adapted by
-putting molecular rows back into job JSON.
+Job payloads remain compact references. Molecular matrices do not enter queue JSON,
+and workers do not own scientific identity or publication rules.
 
 ## 5. Target scientific flow
 
@@ -244,8 +247,8 @@ response types do not leak into domain contracts.
 
 ## 11. Job and publication model
 
-Jobs are durable PostgreSQL records with attempt history. CJ-R00 adds attempt tokens
-as fencing tokens so stale workers cannot publish. Exhausted leases become terminal;
+Jobs are durable PostgreSQL records with attempt history and per-claim attempt tokens
+as fencing tokens, so stale workers cannot publish. Exhausted leases become terminal;
 authorization failures are permanent. Scientific publication computes into
 attempt-scoped outputs, verifies contracts/hashes, then transactionally publishes
 metadata referencing immutable CAS bytes. Replay is idempotent.

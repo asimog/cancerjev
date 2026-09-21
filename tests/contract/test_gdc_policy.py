@@ -200,18 +200,12 @@ async def test_snapshot_status_is_frozen_and_release_cannot_be_supplied(tmp_path
             await service.create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
 
 
-def test_transfer_uses_no_token_options(tmp_path):
-    manifest = tmp_path / "manifest.tsv"
-    manifest.write_text("test")
-    with patch("packages.gdc.transfer.subprocess.run") as run:
+def test_transfer_capability_probe_is_argument_safe():
+    with (
+        patch("packages.gdc.transfer.shutil.which", return_value="/usr/bin/gdc-client"),
+        patch("packages.gdc.transfer.subprocess.run") as run,
+    ):
         run.return_value.returncode = 0
-        GDCTransfer().download(manifest, tmp_path / "download")
-    assert run.call_args.args[0] == [
-        "gdc-client",
-        "download",
-        "--resume",
-        "-m",
-        str(manifest.resolve()),
-        "-d",
-        str((tmp_path / "download").resolve()),
-    ]
+        run.return_value.stdout = "gdc-client 1.6.0"
+        assert GDCTransfer().capability() == "gdc-client 1.6.0"
+    assert run.call_args.args[0] == ["/usr/bin/gdc-client", "--version"]

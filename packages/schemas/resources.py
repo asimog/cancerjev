@@ -132,17 +132,6 @@ class AnalysisResponse(BaseModel):
     completed_at: datetime | None
 
 
-class FindingCreate(StrictModel):
-    finding_id: str
-    analysis_id: uuid.UUID
-    finding_type: str
-    gene_id: str | None = None
-    gene_symbol: str | None = None
-    analysis_version: str
-    result_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    payload: dict[str, Any]
-
-
 class FindingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     finding_id: str

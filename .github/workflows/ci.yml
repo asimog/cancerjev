@@ -11,6 +11,19 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: pytest -m "not postgres and not integration and not slow" -q
+      - run: alembic heads
+
+  postgres:
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16-alpine
@@ -34,6 +47,51 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e '.[dev]'
-      - run: ruff check .
-      - run: pytest
+      - run: pytest -m postgres -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm audit --omit=dev
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
+  compose:
+    runs-on: ubuntu-latest
+    needs: [python, postgres, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build and smoke two isolated projects
+        env:
+          CANCERJEV_BIND_HOST: 127.0.0.1
+        run: |
+          CANCERJEV_API_PORT=18000 CANCERJEV_WEB_PORT=13000 CANCERJEV_MINIO_PORT=19000 CANCERJEV_MINIO_CONSOLE_PORT=19001 docker compose --project-name cancerjev-r00-a up --build -d --wait
+          CANCERJEV_API_PORT=28000 CANCERJEV_WEB_PORT=23000 CANCERJEV_MINIO_PORT=29000 CANCERJEV_MINIO_CONSOLE_PORT=29001 docker compose --project-name cancerjev-r00-b up --build -d --wait
+          python scripts/compose_smoke.py --project cancerjev-r00-a
+          python scripts/compose_smoke.py --project cancerjev-r00-b
+      - name: Collect Compose logs
+        if: failure()
+        run: |
+          docker compose --project-name cancerjev-r00-a logs --no-color
+          docker compose --project-name cancerjev-r00-b logs --no-color
+      - name: Remove Compose projects
+        if: always()
+        run: |
+          docker compose --project-name cancerjev-r00-a down --volumes --remove-orphans
+          docker compose --project-name cancerjev-r00-b down --volumes --remove-orphans
 

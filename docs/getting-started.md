@@ -1,7 +1,7 @@
 # Getting started
 
-This workflow targets restored `main`. It runs the current foundation; CJ-R00 must
-pass before roadmap feature implementation begins.
+This workflow targets the CJ-R00-verified foundation. CJ-R01 is the next planned
+milestone and is not included here.
 
 ## Requirements
 
@@ -34,24 +34,29 @@ Do not point tests at development or production data.
 ```bash
 cd apps/web
 npm ci
+npm run lint
 npm run typecheck
 npm run build
+npm audit --omit=dev
+npx playwright install chromium
+npm run test:browser
 ```
-
-At the audited baseline, `npm run lint` is interactive and the dependency audit has
-known findings; CJ-R00 must repair both before they are green gates.
 
 ## Compose
 
 ```bash
 docker compose config --quiet
-docker compose up --build -d
+docker compose up --build -d --wait
 docker compose ps
+python scripts/compose_smoke.py --project cancerjev
 ```
 
-The current file uses fixed host ports 3000, 8000, 9000, and 9001. Check for conflicts
-first; R00 makes them configurable. Compose credentials are local-only and must never
-be reused in deployment. No GDC token belongs in `.env`.
+Bindings default to `127.0.0.1`. Override `CANCERJEV_WEB_PORT`,
+`CANCERJEV_API_PORT`, `CANCERJEV_MINIO_PORT`, and
+`CANCERJEV_MINIO_CONSOLE_PORT` to run isolated projects without port conflicts. For
+example, set distinct values before `docker compose --project-name cancerjev-r00-b
+up --build -d --wait`. Compose credentials are local-only and must never be reused in
+deployment. No GDC token belongs in `.env`.
 
 ## Current interfaces
 
@@ -62,5 +67,6 @@ be reused in deployment. No GDC token belongs in `.env`.
 - Resource list/get APIs for projects, snapshots, artifacts, cohorts, analyses,
   Findings, and materialization creation
 
-Creating an Analysis currently queues a disconnected artifact job; it does not prove
-scientific completion until CJ-R00 connects the production worker path.
+Creating a supported Analysis queues a compact artifact-reference job. The statistics
+worker resolves frozen verified inputs and publishes the deterministic Finding through
+the resource-owned transaction boundary.
