@@ -1,10 +1,10 @@
 from workers.runtime import run_worker
 
 
-def analyze(payload: dict) -> dict:
+def analyze(claimed) -> dict:
     from workers.statistics.analysis import execute_analysis
 
-    return execute_analysis(payload)
+    return execute_analysis(claimed.payload)
 
 
 if __name__ == "__main__":

@@ -30,23 +30,6 @@ DATABASE_URL = os.getenv("CANCERJEV_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured")
 
 
-@pytest.fixture(scope="module", autouse=True)
-def migrated_database():
-    engine = create_engine(DATABASE_URL, isolation_level="AUTOCOMMIT")
-    with engine.connect() as connection:
-        connection.execute(text("DROP SCHEMA public CASCADE"))
-        connection.execute(text("CREATE SCHEMA public"))
-    config = Config("alembic.ini")
-    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
-    command.upgrade(config, "0001")
-    with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0001"
-    command.upgrade(config, "head")
-    with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
-    engine.dispose()
-
-
 @pytest.fixture(autouse=True)
 def clean_database(migrated_database, tmp_path, monkeypatch):
     monkeypatch.setenv("CANCERJEV_OBJECT_BACKEND", "filesystem")
@@ -808,11 +791,18 @@ def test_migration_0003_roundtrip_preserves_pr7(factory):
     config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
     command.downgrade(config, "0002")
     with factory() as session:
+        # ORM rows carry post-0005 columns; historical checks use raw SQL.
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
-        assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
+        assert (
+            session.scalar(
+                text("SELECT count(*) FROM dataset_snapshots WHERE snapshot_id = :id"),
+                {"id": snapshot.snapshot_id},
+            )
+            == 1
+        )
     command.upgrade(config, "head")
     with factory() as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
         assert session.scalar(text("SELECT count(*) FROM materializations")) == 0
         assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
 
