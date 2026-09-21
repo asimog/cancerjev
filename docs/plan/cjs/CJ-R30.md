@@ -1,6 +1,7 @@
 # CJ-R30 — Disabled external contributor API and client
 
-**Status:** planned; disabled by default. **Owner:** external transport adapter.
+**Status:** planned; optional distributed program, disabled by default (does not
+block native production readiness in CJ-R33). **Owner:** external transport adapter.
 **Depends on:** R19, R25, R28–R29.
 
 ## Mission

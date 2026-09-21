@@ -53,7 +53,8 @@ point. Nothing in R01–R33 starts before this gate passes.
 ### Milestone A — Trusted scientific foundation
 
 CJ-R01–R08 deliver reproducible builds, complete open snapshots, recoverable jobs,
-minimal acquisition, artifact-only execution, application authorization, a hidden
+minimal acquisition, artifact-only execution, runtime isolation with project
+boundaries and quotas, a hidden
 public validation partition, and trusted public mutation/CNV/RNA summaries.
 
 Exit: one public dataset can be acquired minimally, frozen, materialized, partitioned,
@@ -84,11 +85,12 @@ CJ-R26–R27 deliver the researcher cockpit and exact handoff/review packages.
 Exit: a researcher can understand, reproduce, export, review, and continue a result
 without reading database rows or logs.
 
-### Milestone E — Distributed network
+### Milestone E — Distributed network (optional)
 
 CJ-R28–R32 add hidden benchmarks, capability profiles, replicated scheduling,
 disabled-by-default external contributions, convergence policy, and adversarial/load
-acceptance.
+acceptance. This milestone is an optional later program: native CancerJev can reach
+production release (Milestone F) without it.
 
 Exit: bounded public EvidencePackets can be distributed without widening data access
 or scientific authority.
@@ -96,7 +98,9 @@ or scientific authority.
 ### Milestone F — Production release
 
 CJ-R33 supplies deployment, monitoring, recovery, backup/restore, release evidence,
-and rollback.
+and rollback. On the native path it may follow Milestone D directly; a
+distributed-enabled deployment additionally requires the Milestone E acceptance
+evidence.
 
 Exit: live acceptance proves public-only minimal acquisition, no GDC credentials,
 reproducible science, recoverable operations, and a complete native user journey.

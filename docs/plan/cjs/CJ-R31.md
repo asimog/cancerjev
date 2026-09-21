@@ -1,6 +1,7 @@
 # CJ-R31 — Convergence and adaptive reasoning allocation
 
-**Status:** planned. **Owner:** convergence policy. **Depends on:** R21–R23, R29–R30.
+**Status:** planned; optional distributed program (does not block native production
+readiness in CJ-R33). **Owner:** convergence policy. **Depends on:** R21–R23, R29–R30.
 
 ## Mission
 

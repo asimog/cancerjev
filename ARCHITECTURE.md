@@ -15,7 +15,7 @@ Baseline: `2bf6c68d93741b9974f46983e0a35c691d69c1f1`.
 | Materialization | `packages/gdc`, `packages/resources`, ingest worker | Public processed mutation/RNA/CNV/clinical parsers | R04, R08 |
 | Durable resources | `packages/resources`, `packages/database` | Project/snapshot/cohort/analysis/finding/job records | R00–R06 |
 | Scientific execution | `packages/statistics`, `scientific`, statistics worker | Primitives and legacy inline handler; artifact job disconnected | R00, R05, R08–R12 |
-| Application identity | none | No user/project authorization boundary | R06 |
+| Runtime isolation and quotas | none | No end-user login; runtime isolation and quotas are planned without user accounts | R00, R06 |
 | Validation firewall | none | Not implemented | R07, R24–R25 |
 | Jev | none | No SDK, adapter, service, or semantic ledger | R13–R15 |
 | Research loop | none | No claims, evidence graph, state, actions, or native agent | R16–R25 |
@@ -177,8 +177,8 @@ Distributed scheduling is an optional adapter after this loop works natively.
 - No GDC token, `X-Auth-Token`, GDC `Authorization`, cookie, token file, dbGaP
   credential, or transfer-tool token option may enter configuration, schemas,
   storage, logs, documentation, or requests.
-- CancerJev application login protects CancerJev resources only. It never grants
-  access to GDC data.
+- CancerJev does not require end-user login. Application/service credentials protect
+  CancerJev resources only and never grant access to GDC data.
 - Acquisition priority is fixed:
 
   ```text
@@ -252,11 +252,14 @@ metadata referencing immutable CAS bytes. Replay is idempotent.
 
 ## 12. Security and deployment
 
-CJ-R06 introduces application identity, project membership, scopes, quotas, and
-audit. Until then, the API is local-development only; CORS is not authorization.
-Logs contain stable IDs and reason codes, not matrices, credentials, or raw provider
+CJ-R06 introduces runtime isolation, project boundaries, service scopes, quotas, and
+audit — without end-user accounts, passwords, sessions, or user roles. Until then,
+the API is local-development only; CORS is not authorization. Logs contain stable IDs
+and reason codes, not matrices, credentials, or raw provider
 responses. Compose is a development topology. CJ-R33 owns production secrets,
-backup/restore, observability, rollback, and release evidence.
+backup/restore, observability, rollback, and release evidence for the native
+system; the optional distributed program (CJ-R28–R32) never blocks native production
+readiness and adds its own distributed-release acceptance when enabled.
 
 ## 13. Architecture change control
 

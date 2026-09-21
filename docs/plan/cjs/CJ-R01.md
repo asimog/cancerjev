@@ -27,7 +27,8 @@ controlled-data, full-BAM, or unbounded-slice capabilities.
 
 Fresh locked installs pass on supported versions; the wheel works outside the source
 tree; all gates are noninteractive; intentionally adding `X-Auth-Token` or a GDC
-token setting fails policy scanning; ordinary CancerJev login and object-storage
-credentials remain distinguishable. No scientific or product feature is added.
+token setting fails policy scanning; object-storage and other CancerJev service
+credentials remain clearly distinguishable from forbidden GDC credentials. No
+scientific or product feature is added.
 
 **Done:** required main checks are enforced, repeatable, documented, and green.

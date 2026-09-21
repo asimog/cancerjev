@@ -24,6 +24,6 @@ not legal access, and it never creates permission to acquire restricted data.
 
 ## Tests and acceptance
 
-Determinism, balance, lineage grouping, cross-project authorization, enumeration,
+Determinism, balance, lineage grouping, cross-project isolation, enumeration,
 timing/error leakage, export/log leakage, and early reveal are tested. Discovery code
 cannot query validation membership or outcomes before a valid locked execution.

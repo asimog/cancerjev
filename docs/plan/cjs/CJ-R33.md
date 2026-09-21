@@ -1,12 +1,14 @@
 # CJ-R33 — Deployment, observability, recovery, and release gate
 
 **Status:** planned final gate. **Owner:** platform operations with domain-owner
-sign-off. **Depends on:** R01–R32.
+sign-off. **Depends on:** R01–R27 (native production readiness). The optional
+distributed program R28–R32 is not a prerequisite; it applies only when distributed
+execution is enabled and adds its own distributed-release acceptance (CJ-R32).
 
 ## Mission
 
 Release a recoverable production system with evidence that scientific, public-data,
-security, and user-journey invariants survive the real deployment topology.
+security, and researcher-journey invariants survive the real deployment topology.
 
 ## Implementation
 
@@ -28,6 +30,8 @@ terminal authorization failure are permitted; full BAM is disabled.
 
 Run clean deployment, migration, rollback, backup/restore, corruption, region/service
 failure, worker death, scaling, load, alert, browser/API/worker journey, and policy
-negative tests. The live acceptance proves no credential appears anywhere, one native
-public-data research loop completes reproducibly, unavailable/not-examined labels are
-truthful, recovery meets objectives, and release evidence is signed and archived.
+negative tests. Native release acceptance proves no credential appears anywhere, one
+native public-data research loop completes reproducibly, unavailable/not-examined
+labels are truthful, recovery meets objectives, and release evidence is signed and
+archived. A distributed-enabled deployment additionally presents the CJ-R32
+distributed-release acceptance evidence.

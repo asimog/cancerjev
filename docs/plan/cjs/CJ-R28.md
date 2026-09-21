@@ -1,6 +1,7 @@
 # CJ-R28 — Hidden benchmarks and capability profiles
 
-**Status:** planned. **Owner:** benchmark service. **Depends on:** R19, R25.
+**Status:** planned; optional distributed program (does not block native production
+readiness in CJ-R33). **Owner:** benchmark service. **Depends on:** R19, R25.
 
 ## Mission
 

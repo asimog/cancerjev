@@ -1,6 +1,7 @@
 # CJ-R29 — Replicated scheduler and diversity
 
-**Status:** planned. **Owner:** scheduler; ledgers retain authoritative work state.
+**Status:** planned; optional distributed program (does not block native production
+readiness in CJ-R33). **Owner:** scheduler; ledgers retain authoritative work state.
 **Depends on:** R17, R25, R28.
 
 ## Mission

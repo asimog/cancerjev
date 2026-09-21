@@ -13,8 +13,9 @@ handoff without making the UI an authority.
 Build project dashboard, dataset/snapshot browser, acquisition preview, job timeline,
 analysis/search explorer, candidate/evidence graph, Finding/reproduction, hypothesis
 lock/validation, budgets, audit, and export screens. APIs return typed read models;
-long work is asynchronous; errors and provenance are actionable. Enforce R06 access
-at APIs and downloads. Add accessibility and responsive/browser coverage.
+long work is asynchronous; errors and provenance are actionable. Enforce R06 runtime
+isolation and access rules at APIs and downloads. Add accessibility and
+responsive/browser coverage.
 
 ## Open-data rule
 

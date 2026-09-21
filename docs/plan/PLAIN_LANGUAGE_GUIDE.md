@@ -13,7 +13,7 @@ partial evidence; everything outside it is not examined.
 | R03 | Prevent crashed or stale workers from publishing. | One fenced attempt wins; access failures stop permanently. |
 | R04 | Acquire only the smallest public evidence needed. | Full BAMs, tokens, unknown access, and unbounded slices are rejected. |
 | R05 | Run science only from frozen artifacts. | No analysis contacts live GDC; whole-assay engines reject slices. |
-| R06 | Protect CancerJev projects without unlocking GDC. | Users see project permissions and no GDC-token setting. |
+| R06 | Keep projects isolated and budgeted without unlocking GDC. | Projects stay isolated with visible budgets and no GDC-token setting; no account is needed. |
 | R07 | Keep public validation data hidden until a plan is locked. | Discovery cannot inspect validation membership or outcomes early. |
 | R08 | Build trustworthy public mutation, CNV, and RNA summaries. | Missing or unexamined data never appears negative. |
 | R09 | Compare modalities while respecting covariates and coverage. | Results list the exact tested features, samples, and adjustments. |
@@ -43,4 +43,5 @@ partial evidence; everything outside it is not examined.
 | R33 | Prove production can operate and recover safely. | Live release evidence shows public-only minimal acquisition, restore, and no credentials. |
 
 Each row is only a summary. The matching file in [`cjs/`](cjs/README.md) defines the
-tests and acceptance criteria.
+tests and acceptance criteria. R28–R32 are an optional distributed-contributor
+program; they never block the native production release (R33).
