@@ -1,7 +1,8 @@
 # CancerJev Canonical Implementation Roadmap
 
 Baseline: restored `origin/main` at `2bf6c68d93741b9974f46983e0a35c691d69c1f1`.
-Status: CJ-R00 is required; CJ-R01–CJ-R33 are planned.
+Status: CJ-R00 completed and verified on 2026-09-22; CJ-R01 is next. CJ-R01–CJ-R33
+remain planned and have not begun.
 
 Every row links to its authoritative, separately reviewable specification. Later CJs
 may refine files and symbols after predecessors land, but may not weaken open-data,

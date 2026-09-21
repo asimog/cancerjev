@@ -66,6 +66,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm audit --omit=dev
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
 
   compose:
     runs-on: ubuntu-latest
