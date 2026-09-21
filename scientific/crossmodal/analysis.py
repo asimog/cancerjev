@@ -16,7 +16,8 @@ import scipy
 
 from packages.provenance.hashing import canonical_hash
 from packages.schemas.finding import Finding
-from packages.statistics import benjamini_hochberg, cnv_expression
+from packages.statistics.core import benjamini_hochberg
+from packages.statistics.crossmodal import cnv_expression
 
 FINDING_TYPE = "cnv_expression_association"
 IDENTITY_CONTRACT_VERSION = "cj-r00-result-v1"

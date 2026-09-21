@@ -22,6 +22,7 @@ WHEEL_IMPORTS = (
     "workers.ingest.__main__",
     "workers.statistics.__main__",
     "scientific.crossmodal",
+    "packages.statistics.registry",
 )
 
 
