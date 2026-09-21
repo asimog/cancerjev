@@ -1,10 +1,11 @@
+"""Computed scientific payload; authoritative identity is the publication envelope."""
+
 from pydantic import Field
 
 from packages.schemas.identity import StrictRecord
 
 
 class Finding(StrictRecord):
-    finding_id: str
     snapshot_id: str
     finding_type: str
     gene: str
@@ -12,6 +13,7 @@ class Finding(StrictRecord):
     eligible_cases: int = Field(ge=0)
     eligible_case_ids: tuple[str, ...]
     eligible_sample_ids: tuple[str, ...] = ()
+    n_effective: int = Field(ge=0)
     effect_size: float
     confidence_interval: tuple[float, float] | None = None
     p_value: float = Field(ge=0, le=1)

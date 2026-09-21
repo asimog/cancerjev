@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.main import app
-from packages.database.models import AuditEvent, Cohort, DatasetObject, Job
+from packages.database.models import AuditEvent, Cohort, DatasetObject, Finding, Job
 from packages.database.session import session_factory
 from packages.provenance.hashing import canonical_hash
 from packages.resources.service import (
@@ -22,7 +22,6 @@ from packages.schemas.resources import (
     AnalysisCreate,
     ArtifactRegistration,
     CohortCreate,
-    FindingCreate,
 )
 from packages.schemas.snapshot import SnapshotObject, SnapshotRecord
 
@@ -387,6 +386,9 @@ def test_cohort_identity_and_concurrent_creation(factory) -> None:
 
 
 def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
+    from packages.schemas import resources as resources_schemas
+    from packages.schemas.finding import Finding as FindingPayload
+
     with factory.begin() as session:
         seed_snapshot(session)
         service = DurableResourceService(session)
@@ -408,34 +410,111 @@ def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
             service.create_analysis(
                 request.model_copy(update={"engine_version": "2"}), "analysis-key-0001"
             )
+
+        # Caller-authored Finding identity no longer exists on any surface.
+        assert not hasattr(service, "persist_finding")
+        assert not hasattr(resources_schemas, "FindingCreate")
+
+        payload = FindingPayload(
+            snapshot_id="DS-TCGA-LUAD-test",
+            finding_type="cnv_expression_association",
+            gene="ENSG1",
+            cohort_size=2,
+            eligible_cases=2,
+            eligible_case_ids=("c1", "c2"),
+            eligible_sample_ids=("s1", "s2"),
+            n_effective=2,
+            effect_size=0.5,
+            confidence_interval=(0.1, 0.9),
+            p_value=0.01,
+            q_value=0.02,
+            missing_n=0,
+            missing_fraction=0.0,
+            analysis_version="cnv-rna-v1",
+            input_object_hashes=(f"sha256:{'b' * 64}",),
+            result_hash=f"sha256:{'d' * 64}",
+        )
+        # A queued analysis cannot publish; publication happens while running.
+        with pytest.raises(ResourceConflictError, match="running"):
+            service.publish_findings(analysis, [payload])
         service.transition_analysis(str(analysis.analysis_id), "running")
+        published = service.publish_findings(analysis, [payload])
+        expected_id = "F-" + canonical_hash(
+            {"analysis_id": str(analysis.analysis_id), "result_hash": payload.result_hash}
+        )[:32]
+        assert published[0].finding_id == expected_id
+        assert published[0].gene_id == "ENSG1" and published[0].snapshot_id == analysis.snapshot_id
+        # Idempotent republication converges on the same authoritative row.
+        again = service.publish_findings(analysis, [payload])
+        assert again[0].finding_id == published[0].finding_id
+        assert session.scalar(select(func.count()).select_from(Finding)) == 1
         service.transition_analysis(str(analysis.analysis_id), "completed")
         with pytest.raises(InvalidTransitionError):
             service.transition_analysis(str(analysis.analysis_id), "running")
-        finding = service.persist_finding(
-            FindingCreate(
-                finding_id="F-1",
-                analysis_id=analysis.analysis_id,
-                finding_type="mutation_rna",
-                gene_id="ENSG1",
-                gene_symbol="TP53",
-                analysis_version="1",
-                result_hash=f"sha256:{'b' * 64}",
-                payload={"effect_size": 1.2},
-            )
-        )
+        with pytest.raises(ResourceConflictError, match="running"):
+            service.publish_findings(analysis, [payload])
         matches = service.findings.list(
             snapshot_id=None,
             cohort_id=None,
             analysis_id=None,
-            finding_type="mutation_rna",
-            gene="TP53",
-            result_hash=finding.result_hash,
+            finding_type="cnv_expression_association",
+            gene=None,
+            result_hash=payload.result_hash,
             limit=10,
             offset=0,
         )
-        assert [value.finding_id for value in matches] == ["F-1"]
+        assert [value.finding_id for value in matches] == [expected_id]
         assert session.scalar(select(func.count()).select_from(AuditEvent)) >= 6
+
+
+def test_findings_and_cohorts_are_database_immutable(factory) -> None:
+    from packages.schemas.finding import Finding as FindingPayload
+
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        cohort = service.create_cohort(cohort_request())
+        analysis = service.create_analysis(
+            AnalysisCreate(
+                snapshot_id="DS-TCGA-LUAD-test",
+                cohort_id=cohort.cohort_id,
+                engine="crossmodal",
+                engine_version="1",
+                input_materializations=[seed_analysis_input(session)],
+            ),
+            "immutable-findings",
+        )
+        service.transition_analysis(str(analysis.analysis_id), "running")
+        service.publish_findings(
+            analysis,
+            [
+                FindingPayload(
+                    snapshot_id="DS-TCGA-LUAD-test",
+                    finding_type="cnv_expression_association",
+                    gene="ENSG1",
+                    cohort_size=2,
+                    eligible_cases=2,
+                    eligible_case_ids=("c1", "c2"),
+                    n_effective=2,
+                    effect_size=0.5,
+                    p_value=0.01,
+                    q_value=0.02,
+                    missing_n=0,
+                    missing_fraction=0.0,
+                    analysis_version="cnv-rna-v1",
+                    input_object_hashes=(f"sha256:{'b' * 64}",),
+                    result_hash=f"sha256:{'e' * 64}",
+                )
+            ],
+        )
+    for statement in (
+        "UPDATE findings SET payload = '{}'::jsonb",
+        "DELETE FROM findings",
+        "UPDATE cohorts SET definition = '{}'::jsonb",
+        "DELETE FROM cohorts",
+    ):
+        with factory.begin() as session, pytest.raises(DBAPIError):
+            session.execute(text(statement))
 
 
 def test_fk_rollback_and_matrix_rejection(factory) -> None:

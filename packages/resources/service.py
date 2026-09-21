@@ -1,6 +1,7 @@
 import json
 import tempfile
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,11 +36,11 @@ from packages.database.repositories import (
 from packages.gdc.policy import official_api, require_open
 from packages.provenance.hashing import canonical_hash
 from packages.resources.snapshots import FrozenSnapshotReader
+from packages.schemas.finding import Finding as FindingPayload
 from packages.schemas.resources import (
     AnalysisCreate,
     ArtifactRegistration,
     CohortCreate,
-    FindingCreate,
 )
 from packages.schemas.snapshot import SnapshotRecord
 from packages.storage.config import StorageSettings
@@ -399,20 +400,42 @@ class DurableResourceService:
             self._audit(f"analysis.{state}", "analysis", str(analysis.analysis_id))
         return analysis
 
-    def persist_finding(self, request: FindingCreate) -> Finding:
-        _reject_matrix_payload(request.payload)
-        analysis = self.analyses.get(str(request.analysis_id))
-        if analysis is None or analysis.state != "completed":
-            raise ResourceConflictError("finding requires a completed analysis")
-        finding = self.findings.save(
-            Finding(
-                **request.model_dump(),
-                snapshot_id=analysis.snapshot_id,
-                cohort_id=analysis.cohort_id,
+    def publish_findings(
+        self, analysis: Analysis, findings: Sequence[FindingPayload]
+    ) -> list[Finding]:
+        """Server-owned publication of computed scientific payloads.
+
+        Finding identity is derived here from the analysis and the
+        deterministic result hash; callers can never supply authoritative IDs
+        or hashes. Concurrent attempts converge on the unique
+        (analysis_id, result_hash) publication instead of duplicating rows.
+        """
+        if analysis.state != "running":
+            raise ResourceConflictError("finding publication requires a running analysis")
+        published: list[Finding] = []
+        for finding in findings:
+            finding_id = "F-" + canonical_hash(
+                {"analysis_id": str(analysis.analysis_id), "result_hash": finding.result_hash}
+            )[:32]
+            published.append(
+                self.findings.save(
+                    Finding(
+                        finding_id=finding_id,
+                        analysis_id=analysis.analysis_id,
+                        snapshot_id=analysis.snapshot_id,
+                        cohort_id=analysis.cohort_id,
+                        finding_type=finding.finding_type,
+                        gene_id=finding.gene,
+                        gene_symbol=None,
+                        analysis_version=finding.analysis_version,
+                        result_hash=finding.result_hash,
+                        payload=finding.model_dump(mode="json"),
+                    )
+                )
             )
-        )
-        self._audit("finding.persisted", "finding", finding.finding_id)
-        return finding
+        for row in published:
+            self._audit("finding.published", "finding", row.finding_id)
+        return published
 
     def _audit(
         self,

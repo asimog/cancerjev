@@ -1,63 +1,180 @@
+"""Deterministic CNV/RNA association engine with complete scientific identity.
+
+The engine is infrastructure-free: it receives cohort-filtered canonical rows
+and a frozen context, rejects duplicate biological keys, applies finite-value
+eligibility before the minimum-pairs check, and computes a result identity
+that binds every material scientific input and output. Row ordering and
+execution timing never affect the identity.
+"""
+
+import platform
 from collections import defaultdict
+from dataclasses import dataclass, field
+
+import numpy as np
+import scipy
 
 from packages.provenance.hashing import canonical_hash
 from packages.schemas.finding import Finding
 from packages.statistics import benjamini_hochberg, cnv_expression
 
+FINDING_TYPE = "cnv_expression_association"
+IDENTITY_CONTRACT_VERSION = "cj-r00-result-v1"
+ELIGIBILITY_VERSION = "cnv-rna-eligibility-v1"
+MIN_PAIRS = 4
+
+
+def runtime_environment() -> dict:
+    """Identity-bearing runtime versions for deterministic engines."""
+    return {
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "scipy": scipy.__version__,
+    }
+
+
+@dataclass(frozen=True)
+class EngineContext:
+    """Frozen identity-bearing inputs; nothing here is worker or UI state."""
+
+    snapshot_id: str
+    snapshot_hash: str
+    cohort_id: str | None
+    cohort_content_hash: str | None
+    cohort_size: int
+    engine_version: str
+    method_version: str
+    parameters: dict
+    input_hashes: tuple[str, ...]
+    environment: dict = field(default_factory=runtime_environment)
+
 
 def analyze_cnv_rna(
-    snapshot_id: str,
-    cohort_size: int,
-    cnv_rows: list[dict],
-    rna_rows: list[dict],
-    input_hashes: list[str],
+    context: EngineContext, cnv_rows: list[dict], rna_rows: list[dict]
 ) -> list[Finding]:
-    """Inner-join exact case/sample/gene identity and disclose every eligible population."""
-    cnv = {(r["case_id"], r["sample_id"], r["gene_id"]): r for r in cnv_rows}
-    rna = {(r["case_id"], r["sample_id"], r["gene_id"]): r for r in rna_rows}
+    """Inner-join exact case/sample/gene identity and disclose the analyzed population."""
+    cnv = _unique_keys(cnv_rows, "cnv")
+    rna = _unique_keys(rna_rows, "rna")
     pairs = defaultdict(list)
     for key in sorted(cnv.keys() & rna.keys()):
         pairs[key[2]].append((key, cnv[key], rna[key]))
-    interim = []
+    tested = []
     for gene, rows in sorted(pairs.items()):
-        if len(rows) < 4:
+        # Finite-value eligibility precedes the minimum-pairs check so the
+        # reported population is exactly the population the statistic used.
+        finite = [
+            (key, cnv_row, rna_row)
+            for key, cnv_row, rna_row in rows
+            if _is_finite(cnv_row.get("cnv_value")) and _is_finite(rna_row.get("value"))
+        ]
+        if len(finite) < MIN_PAIRS:
             continue
-        result = cnv_expression([r[1]["cnv_value"] for r in rows], [r[2]["value"] for r in rows])
-        interim.append((gene, rows, result))
-    q_values = benjamini_hochberg([r.p_value for _, _, r in interim])
+        try:
+            result = cnv_expression(
+                [row["cnv_value"] for _, row, _ in finite],
+                [row["value"] for _, _, row in finite],
+            )
+        except ValueError:
+            # Zero-variance genes are untestable, not analysis failures.
+            continue
+        tested.append((gene, finite, result))
+    q_values = benjamini_hochberg([result.p_value for _, _, result in tested])
     findings = []
-    for (gene, rows, result), q in zip(interim, q_values, strict=True):
-        cases = tuple(sorted({row[0][0] for row in rows}))
-        samples = tuple(sorted({row[0][1] for row in rows}))
-        identity = {
-            "snapshot_id": snapshot_id,
-            "gene": gene,
-            "effect": result.effect_size,
-            "p": result.p_value,
-            "q": q,
-            "cases": cases,
-            "analysis": "cnv-rna-v1",
+    for (gene, finite, result), q in zip(tested, q_values, strict=True):
+        cases = tuple(sorted({key[0] for key, _, _ in finite}))
+        samples = tuple(sorted({key[1] for key, _, _ in finite}))
+        payload = {
+            "effect_size": result.effect_size,
+            "p_value": result.p_value,
+            "q_value": q,
+            "confidence_interval": list(result.confidence_interval),
+            "n_effective": len(finite),
+            "eligible_case_ids": list(cases),
+            "eligible_sample_ids": list(samples),
+            "missing_n": max(context.cohort_size - len(cases), 0),
         }
-        result_hash = canonical_hash(identity)
+        result_hash = _result_identity(context, gene, payload)
         findings.append(
             Finding(
-                finding_id=f"F-{result_hash[-12:]}",
-                snapshot_id=snapshot_id,
-                finding_type="cnv_expression_association",
+                snapshot_id=context.snapshot_id,
+                finding_type=FINDING_TYPE,
                 gene=gene,
-                cohort_size=cohort_size,
+                cohort_size=context.cohort_size,
                 eligible_cases=len(cases),
                 eligible_case_ids=cases,
                 eligible_sample_ids=samples,
+                n_effective=len(finite),
                 effect_size=result.effect_size,
                 confidence_interval=result.confidence_interval,
                 p_value=result.p_value,
                 q_value=q,
-                missing_n=cohort_size - len(cases),
-                missing_fraction=(cohort_size - len(cases)) / cohort_size if cohort_size else 0,
-                analysis_version="cnv-rna-v1",
-                input_object_hashes=tuple(sorted(input_hashes)),
+                missing_n=payload["missing_n"],
+                missing_fraction=(
+                    payload["missing_n"] / context.cohort_size if context.cohort_size else 0
+                ),
+                analysis_version=context.method_version,
+                input_object_hashes=tuple(sorted(context.input_hashes)),
                 result_hash=result_hash,
             )
         )
     return findings
+
+
+def _result_identity(context: EngineContext, gene: str, payload: dict) -> str:
+    """Canonical scientific identity: every material input and output is bound."""
+    for name in ("effect_size", "p_value", "q_value"):
+        if not _is_finite(payload[name]):
+            raise ValueError(f"non-finite {name} cannot enter scientific identity")
+    low, high = payload["confidence_interval"]
+    if not _is_finite(low) or not _is_finite(high):
+        raise ValueError("non-finite confidence interval cannot enter scientific identity")
+    identity = {
+        "identity_contract_version": IDENTITY_CONTRACT_VERSION,
+        "snapshot": {"snapshot_id": context.snapshot_id, "snapshot_hash": context.snapshot_hash},
+        "cohort": {
+            "cohort_id": context.cohort_id,
+            "content_hash": context.cohort_content_hash,
+        },
+        "input_artifacts": sorted(context.input_hashes),
+        "engine": {
+            "engine": "cnv_rna",
+            "engine_version": context.engine_version,
+            "method_version": context.method_version,
+        },
+        "parameters": context.parameters,
+        "family": {"finding_type": FINDING_TYPE, "gene_id": gene},
+        "eligibility": {
+            "min_pairs": MIN_PAIRS,
+            "finite_required": True,
+            "eligibility_version": ELIGIBILITY_VERSION,
+        },
+        "environment": context.environment,
+        "output": {
+            "effect_size": payload["effect_size"],
+            "p_value": payload["p_value"],
+            "q_value": payload["q_value"],
+            "confidence_interval": payload["confidence_interval"],
+            "n_effective": payload["n_effective"],
+            "eligible_case_ids": payload["eligible_case_ids"],
+            "eligible_sample_ids": payload["eligible_sample_ids"],
+            "missing_n": payload["missing_n"],
+        },
+    }
+    return canonical_hash(identity)
+
+
+def _unique_keys(rows: list[dict], label: str) -> dict[tuple[str, str, str], dict]:
+    """Duplicate biological keys are a deterministic input failure, never a policy."""
+    indexed: dict[tuple[str, str, str], dict] = {}
+    for row in rows:
+        key = (row["case_id"], row["sample_id"], row["gene_id"])
+        if key in indexed:
+            raise ValueError(
+                f"duplicate_{label}_key: ({key[0]}, {key[1]}, {key[2]}) appears more than once"
+            )
+        indexed[key] = row
+    return indexed
+
+
+def _is_finite(value) -> bool:
+    return isinstance(value, (int, float)) and np.isfinite(value)
