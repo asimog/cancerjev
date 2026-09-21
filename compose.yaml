@@ -13,8 +13,9 @@ services:
       <<: *object-environment
       CANCERJEV_SNAPSHOT_ROOT: /data/snapshots
       CANCERJEV_DATABASE_URL: postgresql+psycopg://cancerjev:cancerjev-local@postgres/cancerjev
+      CANCERJEV_WEB_ORIGIN: http://localhost:${CANCERJEV_WEB_PORT:-3000}
     ports:
-      - "8000:8000"
+      - "${CANCERJEV_BIND_HOST:-127.0.0.1}:${CANCERJEV_API_PORT:-8000}:8000"
     volumes:
       - snapshot-data:/data
     depends_on:
@@ -63,16 +64,20 @@ services:
       postgres: {condition: service_healthy}
 
   web:
-    build: apps/web
+    build:
+      context: apps/web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:${CANCERJEV_API_PORT:-8000}
     environment:
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:8000
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    ports: ["3000:3000"]
+      NEXT_PUBLIC_API_URL: http://localhost:${CANCERJEV_API_PORT:-8000}
+    ports:
+      - "${CANCERJEV_BIND_HOST:-127.0.0.1}:${CANCERJEV_WEB_PORT:-3000}:3000"
     depends_on:
       api: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -99,8 +104,8 @@ services:
       MINIO_ROOT_USER: cancerjev
       MINIO_ROOT_PASSWORD: cancerjev-local-secret
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${CANCERJEV_BIND_HOST:-127.0.0.1}:${CANCERJEV_MINIO_PORT:-9000}:9000"
+      - "${CANCERJEV_BIND_HOST:-127.0.0.1}:${CANCERJEV_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - object-data:/data
     healthcheck:

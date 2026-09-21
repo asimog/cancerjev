@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     gdc_max_response_bytes: int = Field(default=100_000_000, ge=1)
     database_url: str = Field(default="postgresql+psycopg://localhost/cancerjev")
     snapshot_root: Path = Path(".data/snapshots")
+    web_origin: AnyHttpUrl = "http://localhost:3000"
 
     @field_validator("gdc_base_url")
     @classmethod
