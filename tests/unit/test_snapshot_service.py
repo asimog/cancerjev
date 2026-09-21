@@ -1,8 +1,10 @@
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
-from packages.schemas.snapshot import LogicalSnapshotRequest
+from packages.schemas.snapshot import LogicalSnapshotRequest, SnapshotRecord
 from packages.storage.parquet import query
 from packages.storage.snapshots import (
     REQUIRED_ARTIFACTS,
@@ -185,3 +187,119 @@ async def test_corrupt_existing_snapshot_is_rejected(tmp_path: Path) -> None:
     marker.write_text('{"snapshot_hash":"sha256:wrong"}', encoding="utf-8")
     with pytest.raises(SnapshotConflictError, match="conflicts"):
         await service.create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+
+
+def hit(file_id: str, case_submitter: str = "case-A", sample_type: str = "Primary Tumor") -> dict:
+    # Deterministic fixture checksum; not an upstream GDC claim.
+    return {
+        "file_id": file_id,
+        "file_name": f"{file_id}.tsv",
+        "file_size": 10,
+        "md5sum": hashlib.sha256(file_id.encode()).hexdigest()[:32],
+        "access": "open",
+        "cases": [
+            {
+                "case_id": "c-1",
+                "submitter_id": case_submitter,
+                "project": {"project_id": "TCGA-LUAD"},
+                "samples": [{"sample_id": "s-1", "sample_type": sample_type}],
+            }
+        ],
+    }
+
+
+class ListingClient:
+    base_url = "https://api.gdc.cancer.gov"
+
+    def __init__(self, hits: list[dict]):
+        self.hits = hits
+
+    async def status(self):
+        return {"version": "1", "data_release": "42", "status": "OK"}
+
+    async def get_open_files(self, project_id: str, **_: object) -> dict:
+        return {"data": {"hits": self.hits}}
+
+
+@pytest.mark.asyncio
+async def test_conflicting_duplicate_biological_records_fail_closed(tmp_path: Path) -> None:
+    conflicting = ListingClient([hit("f-1"), hit("f-2", case_submitter="case-B")])
+    with pytest.raises(ValueError, match="conflicting_case_identity"):
+        await LogicalSnapshotService(
+            client=conflicting, repository=FileSnapshotRepository(tmp_path)
+        ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+
+
+@pytest.mark.asyncio
+async def test_exact_duplicate_records_collapse(tmp_path: Path) -> None:
+    duplicate = ListingClient([hit("f-1"), hit("f-2")])
+    snapshot = await LogicalSnapshotService(
+        client=duplicate, repository=FileSnapshotRepository(tmp_path)
+    ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+    root = tmp_path / "TCGA-LUAD" / snapshot.snapshot_id
+    cases = query(root / "cases.parquet")
+    assert cases.height == 1 and cases["submitter_id"][0] == "case-A"
+    links = query(root / "file_sample_links.parquet")
+    assert links.height == 2
+
+
+@pytest.mark.asyncio
+async def test_v2_identity_is_invariant_to_hit_ordering(tmp_path: Path) -> None:
+    forward = await LogicalSnapshotService(
+        client=ListingClient([hit("f-1"), hit("f-2")]),
+        repository=FileSnapshotRepository(tmp_path / "forward"),
+    ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+    reversed_ = await LogicalSnapshotService(
+        client=ListingClient([hit("f-2"), hit("f-1")]),
+        repository=FileSnapshotRepository(tmp_path / "reverse"),
+    ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+    assert forward.snapshot_hash == reversed_.snapshot_hash
+    assert forward.snapshot_id == reversed_.snapshot_id
+
+
+@pytest.mark.asyncio
+async def test_record_field_changes_change_the_v2_digest(tmp_path: Path) -> None:
+    request = LogicalSnapshotRequest(project_id="TCGA-LUAD")
+    base = await LogicalSnapshotService(
+        client=ListingClient([hit("f-1")]),
+        repository=FileSnapshotRepository(tmp_path / "base"),
+    ).create(request)
+    changed_submitter = await LogicalSnapshotService(
+        client=ListingClient([hit("f-1", case_submitter="case-B")]),
+        repository=FileSnapshotRepository(tmp_path / "submitter"),
+    ).create(request)
+    changed_sample_type = await LogicalSnapshotService(
+        client=ListingClient([hit("f-1", sample_type="Solid Tissue Normal")]),
+        repository=FileSnapshotRepository(tmp_path / "sample"),
+    ).create(request)
+    digests = {
+        base.snapshot_hash,
+        changed_submitter.snapshot_hash,
+        changed_sample_type.snapshot_hash,
+    }
+    assert len(digests) == 3
+    assert base.identity_version == 2
+
+
+def test_legacy_v1_snapshot_record_remains_readable() -> None:
+    legacy = {
+        "snapshot_id": "DS-TCGA-LUAD-legacy",
+        "snapshot_hash": "sha256:" + "0" * 64,
+        "project_id": "TCGA-LUAD",
+        "source_api": "https://api.gdc.cancer.gov",
+        "gdc_release": "42",
+        "query": {},
+        "transformation_version": "logical-v1",
+        "objects": [
+            {
+                "file_id": "f-1",
+                "file_name": "one.tsv",
+                "file_size": 10,
+                "md5sum": "a" * 32,
+                "access": "open",
+            }
+        ],
+    }
+    record = SnapshotRecord.model_validate_json(json.dumps(legacy))
+    assert record.identity_version == 1
+    assert record.case_ids == ()

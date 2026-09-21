@@ -116,6 +116,7 @@ class DurableResourceService:
                 "transformation": snapshot.transformation_version,
                 "normalization": snapshot.normalization_metadata,
             },
+            identity_version=snapshot.identity_version,
             manifest_sha256=_role_hash(by_role, "manifest"),
             coverage_sha256=_role_hash(by_role, "coverage"),
             identity_sha256=_role_hash(by_role, "identity_links"),

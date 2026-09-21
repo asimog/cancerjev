@@ -43,6 +43,8 @@ class SnapshotRecord(BaseModel):
     query: dict[str, Any]
     transformation_version: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    #: v1 hashed only case/sample/aliquot ID lists; v2 hashes complete records.
+    identity_version: int = 1
     objects: tuple[SnapshotObject, ...]
     case_ids: tuple[str, ...] = ()
     sample_ids: tuple[str, ...] = ()
