@@ -26,7 +26,11 @@ from packages.schemas.resources import (
 from packages.schemas.snapshot import SnapshotObject, SnapshotRecord
 
 DATABASE_URL = os.getenv("CANCERJEV_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured")
+pytestmark = [
+    pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured"),
+    pytest.mark.postgres,
+    pytest.mark.integration,
+]
 
 
 @pytest.fixture(autouse=True)

@@ -42,6 +42,11 @@ packages = ["apps", "packages", "scientific", "workers"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "postgres: real PostgreSQL required because database semantics are part of the assertion",
+  "integration: several real CancerJev components exercised together",
+  "slow: deliberately expensive acceptance/build/stress behavior outside the normal coding loop",
+]
 
 [tool.ruff]
 line-length = 100

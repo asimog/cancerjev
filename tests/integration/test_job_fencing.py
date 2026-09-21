@@ -23,7 +23,11 @@ from packages.database.models import Job, JobAttempt
 from packages.database.session import session_factory
 
 DATABASE_URL = os.getenv("CANCERJEV_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured")
+pytestmark = [
+    pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured"),
+    pytest.mark.postgres,
+    pytest.mark.integration,
+]
 
 
 @pytest.fixture

@@ -219,6 +219,24 @@ Every requirement should map to implementation evidence and tests.
 
 Break each CJ into small logical implementation units.
 
+Governing test rule:
+
+```text
+Use the cheapest test layer that can genuinely prove the invariant.
+```
+
+Intended test loop:
+
+```text
+edit
+→ focused test
+→ rerun only failures
+→ related fast regression tests
+→ relevant PostgreSQL/integration tests only when the change requires them
+→ CJ acceptance suite
+→ full regression before merge
+```
+
 For each unit:
 
 1. inspect surrounding code
@@ -228,7 +246,27 @@ For each unit:
 5. fix failures before continuing
 6. review the diff
 
+During active coding, prefer:
+
+```bash
+python -m pytest path/to/test.py::test_name -q -x
+```
+
+and, for reruns:
+
+```bash
+python -m pytest --lf -q
+```
+
+Do not run the full repository suite after every small edit.
+
+Do not rerun a 60+ second integration file repeatedly while debugging one or two failing cases; rerun the full affected integration file only after the focused failures pass.
+
+If a run reports `2 failed, 6 passed`, rerun the two failures first, not all eight tests.
+
 Do not implement a whole CJ as one uncontrolled patch.
+
+Once a simple test design satisfies the CJ requirement and focused tests prove it, implement it and move on. Do not repeatedly reconsider settled implementation or testing decisions unless new evidence shows they are wrong.
 
 ## 10. Tests must prove positive, boundary, and negative behavior
 
@@ -271,9 +309,51 @@ Examples:
 - cross-project disclosure
 - unsupported scientific claims
 
+Test each condition at the cheapest layer that can genuinely prove it:
+
+```text
+NaN rejected by scientific engine           → unit/scientific test
+full BAM rejected by acquisition policy     → policy/contract test
+stale worker cannot publish after reclaim   → PostgreSQL integration test
+Jev cannot alter q-value                    → service/domain test
+hidden validation cannot be exposed early  → API/integration test
+```
+
 Never weaken a test merely to make an implementation pass.
 
 ## 11. Use real PostgreSQL for persistence/concurrency invariants
+
+Most CancerJev tests should remain pure and fast.
+
+Do not use PostgreSQL merely because production code eventually persists the result.
+
+Examples that normally should NOT require PostgreSQL:
+
+- mutation, CNV, and RNA calculations
+- cross-modal statistics, effect sizes, confidence intervals
+- p/q-value correction
+- deterministic candidate gating and ranking
+- hashing and scientific identity helpers
+- duplicate detection
+- schema/Pydantic validation
+- eligibility, missingness, and coverage logic
+- GDC request-policy validation that does not depend on persistence
+- BAM range/scope validation
+- CandidateState construction
+- Jev question construction
+- provider-response mapping
+- deterministic routing logic
+- scientific serialization
+
+Typical layer mapping:
+
+```text
+CNV/RNA statistic         → pure scientific test
+candidate gate            → pure unit/scientific test
+Finding hash              → pure unit test
+worker lease race         → PostgreSQL test
+immutable Finding trigger → PostgreSQL test
+```
 
 Mocks are not sufficient proof for:
 
@@ -288,6 +368,159 @@ Mocks are not sufficient proof for:
 - migration behavior
 
 Fast unit tests are useful, but critical database invariants require real PostgreSQL integration tests.
+
+### Database fixture policy
+
+Preferred normal pattern:
+
+```text
+test session starts
+→ disposable test DB available
+→ migrations applied once
+→ ordinary DB tests use isolated transaction/savepoint where practical
+→ rollback
+→ next test
+```
+
+Do not normally drop schema, recreate schema, and replay all migrations for every ordinary DB test.
+
+Migration tests are separate. Migration-specific tests may deliberately create a clean schema/database and run upgrade/downgrade paths.
+
+Migration tests must not depend on pytest file ordering and must not leave the shared DB at the wrong migration version.
+
+No ordinary integration test may rely on:
+
+- another test file having run first
+- another migration test restoring state later
+- alphabetical module order
+
+## 11a. Test tiers and markers
+
+Markers:
+
+- `postgres` — real PostgreSQL required because database semantics are part of the assertion
+- `integration` — several real CancerJev components exercised together
+- `slow` — deliberately expensive acceptance/build/stress behavior that should not be in the normal coding loop
+
+Unmarked tests should normally be fast.
+
+Normal fast developer command:
+
+```bash
+python -m pytest -m "not postgres and not integration and not slow" -q
+```
+
+PostgreSQL tests:
+
+```bash
+python -m pytest -m postgres -q
+```
+
+Integration tests:
+
+```bash
+python -m pytest -m integration -q
+```
+
+Slowest-test report:
+
+```bash
+python -m pytest --durations=30 -q
+```
+
+Full regression — before merge, not the default after every edit:
+
+```bash
+python -m pytest -q
+```
+
+## 11b. Integration, provider, browser, and packaging test scope
+
+Integration tests should prove important component boundaries, not repeat every scientific edge case through the whole stack.
+
+Good integration examples:
+
+```text
+Analysis
+→ PostgreSQL
+→ Job
+→ worker
+→ deterministic execution
+→ Finding
+```
+
+or:
+
+```text
+SearchRun
+→ worker
+→ result artifact
+→ CandidateObservation
+```
+
+Do not repeat every NaN, duplicate, empty-cohort, threshold, or statistical edge case through the full worker/database stack if those are already proven cheaply in scientific/unit tests.
+
+Routine automated tests must not depend on live GDC, TypeSafe/Jev, OpenRouter, or literature providers. Use deterministic adapter-level mocks/fakes for routine automated tests. Live provider tests are separate manual integration tests. Never make normal CI slow, flaky, costly, or dependent on third-party uptime.
+
+Browser tests should cover major researcher journeys, not every backend permutation. Do not use the browser to prove statistical correctness. The frontend is presentation, not scientific authority.
+
+Packaging tests should prove the actual packaging invariant with the smallest reliable approach: build the wheel once, inspect wheel contents/RECORD, and perform one necessary isolated import smoke test if needed. Do not build elaborate venv/PYTHONPATH/meta-path simulations unless an actual packaging regression requires them. Expensive wheel-build tests are not part of the normal fast loop.
+
+## 11c. Runtime discipline and profiling
+
+If a focused test that normally completes in roughly a minute runs for several minutes with no useful output or progress:
+
+1. stop it
+2. inspect the running process
+3. check for:
+   - database deadlock
+   - blocked transaction
+   - hanging subprocess
+   - migration lock
+   - network wait
+   - Docker/service wait
+   - orphan worker
+4. rerun the single affected test with verbose output
+
+Do not let a focused test run for tens of minutes without investigation.
+
+Runtime expectations (guidance, not hard failures):
+
+- pure unit/scientific tests: milliseconds to a few seconds
+- focused PostgreSQL tests: usually seconds
+- small integration file: ideally under tens of seconds
+- around one minute: acceptable but profile
+- multiple minutes for a focused file: investigate
+- tens of minutes: treat as a likely hang or test-design problem
+
+Do not enforce arbitrary hard timeouts without evidence.
+
+While actively debugging a failing test, do not pipe pytest through output filters such as:
+
+```powershell
+... | Select-String -Pattern "passed|failed|FAILED" | Select-Object -First 4
+```
+
+because this can hide traceback details, setup failures, teardown failures, warnings, and hangs. Filtered output is acceptable only for a quick status check after the failure is already understood.
+
+Profile before optimizing:
+
+```bash
+python -m pytest --durations=30 -q
+```
+
+Look for:
+
+- repeated migrations
+- schema recreation
+- oversized fixtures
+- repeated Parquet generation
+- repeated object-store setup
+- unnecessary API/worker startup
+- network calls
+- duplicated integration coverage
+
+Do not add `pytest-xdist` or other new test infrastructure until the actual bottleneck has been measured.
 
 ## 12. Job ownership must be fenced
 
@@ -630,6 +863,13 @@ Record:
 - security/policy scan results
 - known limitations
 - explicit deferrals
+
+Distinguish per-edit runs from CJ completion:
+
+- During active implementation: run focused tests and related fast regressions.
+- At CJ completion: run all relevant scientific golden tests, PostgreSQL invariants, integration tests, browser tests where applicable, lint, typecheck, build, security/policy tests, and the broader regression suite.
+
+Do not confuse "what I run after changing one function" with "what proves the CJ is complete."
 
 Update current-truth documentation when implementation behavior changes.
 

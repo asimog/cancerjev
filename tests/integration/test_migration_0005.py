@@ -9,7 +9,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 DATABASE_URL = os.getenv("CANCERJEV_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured")
+pytestmark = [
+    pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured"),
+    pytest.mark.postgres,
+    pytest.mark.integration,
+]
 
 LEGACY_SNAPSHOT = "sha256:" + "1" * 64
 LEGACY_COHORT = "CO-legacy"
