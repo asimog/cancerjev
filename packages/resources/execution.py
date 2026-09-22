@@ -39,6 +39,9 @@ REQUIRED_COLUMNS = {
     "expression": ("case_id", "sample_id", "gene_id", "value"),
 }
 
+#: Page size for paged server-owned reads; reported counts are never truncated.
+FINDING_PAGE_SIZE = 1000
+
 
 class ExecutionFailure(Exception):
     """Deterministic failure with a bounded reason code recorded on the job."""
@@ -163,10 +166,17 @@ class AnalysisExecutionService:
                 for modality, path in staged.items()
             }
         engine_context = frozen.engine_context(cohort, spec)
-        return spec.run(
-            engine_context,
-            **dict(zip(spec.inputs, [rows_by_modality[m] for m in spec.modalities], strict=True)),
-        )
+        try:
+            return spec.run(
+                engine_context,
+                **dict(
+                    zip(spec.inputs, [rows_by_modality[m] for m in spec.modalities], strict=True)
+                ),
+            )
+        except ValueError as exc:
+            # Deterministic engine rejections (duplicate biological keys, unusable
+            # values) are input failures, never unclassified internal errors.
+            raise ExecutionFailure(f"engine rejected canonical input: {exc}") from exc
 
     @staticmethod
     def _stage_inputs(
@@ -310,16 +320,24 @@ class AnalysisExecutionService:
 
     @classmethod
     def _completed_result(cls, session: Session, analysis) -> dict:
-        findings = DurableResourceService(session).findings.list(
-            snapshot_id=None,
-            cohort_id=None,
-            analysis_id=str(analysis.analysis_id),
-            finding_type=None,
-            gene=None,
-            result_hash=None,
-            limit=1000,
-            offset=0,
-        )
+        service = DurableResourceService(session)
+        findings = []
+        offset = 0
+        while True:
+            page = service.findings.list(
+                snapshot_id=None,
+                cohort_id=None,
+                analysis_id=str(analysis.analysis_id),
+                finding_type=None,
+                gene=None,
+                result_hash=None,
+                limit=FINDING_PAGE_SIZE,
+                offset=offset,
+            )
+            findings.extend(page)
+            if len(page) < FINDING_PAGE_SIZE:
+                break
+            offset += len(page)
         return {
             "analysis_id": str(analysis.analysis_id),
             "published": len(findings),

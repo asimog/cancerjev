@@ -307,6 +307,46 @@ def test_artifact_path_end_to_end(factory, settings):
         assert session.get(Job, claimed.job_id).state == "claimed"
 
 
+def test_duplicate_canonical_keys_fail_as_invalid_scientific_input(factory, settings):
+    _, store = seed_snapshot_graph(factory, settings)
+    snapshot_id = "DS-TCGA-LUAD-exec"
+    with factory.begin() as session:
+        service = DurableResourceService(session)
+        cohort = service.create_cohort(
+            CohortCreate(
+                snapshot_id=snapshot_id,
+                definition={"sample_type": "Primary Tumor"},
+                case_ids=list(CASES),
+                sample_ids=[SAMPLES[c] for c in CASES],
+                exclusion_reasons={},
+                selection_policy_version="primary-v1",
+            )
+        )
+    duplicated = cnv_rows(CASES) + cnv_rows(CASES)[:1]
+    inputs = [
+        register_modality(factory, settings, store, snapshot_id, "cnv", duplicated),
+        register_modality(factory, settings, store, snapshot_id, "expression", rna_rows(CASES)),
+    ]
+    with factory.begin() as session:
+        analysis = DurableResourceService(session).create_analysis(
+            AnalysisCreate(
+                snapshot_id=snapshot_id,
+                cohort_id=cohort.cohort_id,
+                engine="cnv_rna",
+                engine_version="1",
+                input_materializations=inputs,
+            ),
+            "duplicate-input-key",
+        )
+    claimed = claim_analysis(factory, "worker-exec")
+    with pytest.raises(ExecutionFailure) as excinfo:
+        AnalysisExecutionService.run_claimed(claimed)
+    assert excinfo.value.failure_reason == "INVALID_SCIENTIFIC_INPUT"
+    with factory() as session:
+        row = session.get(Analysis, analysis.analysis_id)
+        assert row.state == "running" and row.error is None
+
+
 def test_cohort_membership_filters_rows_and_discloses_missingness(factory, settings):
     _, store = seed_snapshot_graph(factory, settings)
     # Five cohort members; one of them has no expression evidence.

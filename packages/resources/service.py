@@ -63,7 +63,7 @@ class InvalidTransitionError(ResourceConflictError):
 
 
 ANALYSIS_TRANSITIONS = {
-    "requested": {"queued", "cancelled"},
+    "requested": {"queued", "running", "failed", "cancelled"},
     "queued": {"running", "failed", "cancelled"},
     "running": {"completed", "failed", "cancelled"},
     "completed": set(),
@@ -115,8 +115,14 @@ class DurableResourceService:
         official_api(snapshot.source_api)
         for item in snapshot.objects:
             require_open(item.access)
+        registrations: dict[str, ArtifactRegistration] = {}
+        for artifact in artifacts:
+            if artifact.logical_role in registrations:
+                raise ResourceConflictError(
+                    f"duplicate artifact logical role: {artifact.logical_role}"
+                )
+            registrations[artifact.logical_role] = artifact
         self.save_project(snapshot.project_id)
-        registrations = {artifact.logical_role: artifact for artifact in artifacts}
         by_role = {
             role: self.register_artifact(artifact) for role, artifact in registrations.items()
         }
@@ -452,8 +458,10 @@ class DurableResourceService:
 
         Finding identity is recomputed here from persisted scientific context
         and deterministic outputs; callers can never supply authoritative IDs,
-        versions, input hashes, tested universes, or result hashes. Concurrent
-        attempts converge on the unique
+        versions, input hashes, tested universes, or result hashes. Every
+        payload's engine-declared tested family must equal the recomputed set,
+        so a caller cannot publish a truncated family under a valid identity.
+        Concurrent attempts converge on the unique
         (analysis_id, result_hash) publication instead of duplicating rows.
         """
         if analysis.state != "running":
@@ -481,6 +489,12 @@ class DurableResourceService:
         tested_gene_ids = tuple(sorted(finding.gene for finding in findings))
         if len(set(tested_gene_ids)) != len(tested_gene_ids):
             raise ResourceConflictError("duplicate finding gene in one tested universe")
+        for finding in findings:
+            declared = tuple(sorted(finding.tested_gene_ids))
+            if declared != tested_gene_ids:
+                raise ResourceConflictError(
+                    "finding tested universe does not match the engine-declared family"
+                )
         published: list[Finding] = []
         for finding in findings:
             authoritative = self._attest_finding(

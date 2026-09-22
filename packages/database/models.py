@@ -229,7 +229,7 @@ class Finding(Base):
         Index("ix_findings_cohort", "cohort_id"),
         Index("ix_findings_analysis", "analysis_id"),
         Index("ix_findings_type", "finding_type"),
-        Index("ix_findings_gene", "gene_symbol"),
+        Index("ix_findings_gene_id", "gene_id"),
         Index("ix_findings_result_hash", "result_hash"),
     )
 

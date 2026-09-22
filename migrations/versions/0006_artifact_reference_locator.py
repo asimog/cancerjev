@@ -11,8 +11,14 @@ snapshot. Storing them on the shared object silently discarded every
 registration after the first. This moves `logical_role`, `storage_backend`, and
 `storage_key` onto `snapshot_artifacts`, where the existing composite primary
 key `(snapshot_id, logical_role)` already makes each reference explicit.
+
+The downgrade can only reconstruct an object locator from a
+`snapshot_artifacts` reference. Objects without one (materialization sources and
+diagnostics) would otherwise receive a fabricated, unresolvable locator, so the
+downgrade fails closed before changing anything and asks for a forward fix.
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "0006"
@@ -47,6 +53,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    unreferenced = op.get_bind().scalar(
+        sa.text(
+            "SELECT count(*) FROM dataset_objects obj WHERE NOT EXISTS ("
+            "SELECT 1 FROM snapshot_artifacts sa WHERE sa.sha256 = obj.sha256)"
+        )
+    )
+    if unreferenced:
+        raise RuntimeError(
+            f"refusing destructive downgrade: {unreferenced} dataset_objects have no "
+            "snapshot_artifacts reference, so their storage locator cannot be restored; "
+            "forward-fix, or register a reference for every object before downgrading"
+        )
     op.execute("""
     DROP TRIGGER trg_snapshot_artifacts_immutable ON snapshot_artifacts;
     DROP TRIGGER trg_dataset_objects_immutable ON dataset_objects;

@@ -277,7 +277,7 @@ class SqlFindingRepository(_Repository):
             (snapshot_id, Finding.snapshot_id),
             (cohort_id, Finding.cohort_id),
             (finding_type, Finding.finding_type),
-            (gene, Finding.gene_symbol),
+            (gene, Finding.gene_id),
             (result_hash, Finding.result_hash),
         ):
             if value:

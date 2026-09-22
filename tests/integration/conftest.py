@@ -25,5 +25,5 @@ def migrated_database():
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0001"
     command.upgrade(config, "head")
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
     engine.dispose()

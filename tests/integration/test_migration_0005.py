@@ -85,7 +85,7 @@ def test_upgrade_from_populated_0004_preserves_and_protects_legacy_rows():
     run_alembic("upgrade", "head")
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
         assert connection.scalar(
             text("SELECT identity_version FROM dataset_snapshots WHERE snapshot_id = 'DS-legacy'")
         ) == 1
@@ -142,7 +142,7 @@ def test_downgrade_roundtrip_never_discards_scientific_rows():
     run_alembic("upgrade", "head")
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
         assert connection.scalar(text("SELECT count(*) FROM findings")) == before
         with pytest.raises(DBAPIError):
             connection.execute(text("DELETE FROM cohorts"))
@@ -181,14 +181,14 @@ def seed_legacy_0005_artifact() -> None:
     engine.dispose()
 
 
-def test_0006_moves_locator_onto_reference_without_loss():
+def test_0006_moves_referenced_locator_onto_reference():
     reset_schema()
     run_alembic("upgrade", "0005")
     seed_legacy_0005_artifact()
     run_alembic("upgrade", "head")
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
         row = connection.execute(
             text(
                 "SELECT storage_backend, storage_key FROM snapshot_artifacts"
@@ -233,5 +233,53 @@ def test_0006_moves_locator_onto_reference_without_loss():
                 )
             )
             == 0
+        )
+    engine.dispose()
+
+
+ORPHAN_OBJECT = "sha256:" + "4" * 64
+
+
+def seed_unreferenced_0005_object() -> None:
+    engine = create_engine(DATABASE_URL)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO dataset_objects (sha256, size, media_type, logical_role,"
+                " storage_backend, storage_key) VALUES (:sha, 10, 'application/octet-stream',"
+                " 'gdc_source', 'filesystem', :key)"
+            ),
+            {"sha": ORPHAN_OBJECT, "key": "sha256/44/" + "4" * 64},
+        )
+    engine.dispose()
+
+
+def test_0006_downgrade_fails_closed_for_unreferenced_object():
+    reset_schema()
+    run_alembic("upgrade", "0005")
+    seed_legacy_0005_artifact()
+    seed_unreferenced_0005_object()
+    run_alembic("upgrade", "head")
+    with pytest.raises(RuntimeError, match="no snapshot_artifacts reference"):
+        run_alembic("downgrade", "0005")
+    engine = create_engine(DATABASE_URL)
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
+        # The refused downgrade changed nothing: locators still live on the reference.
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM information_schema.columns WHERE"
+                    " table_name = 'dataset_objects' AND column_name = 'storage_key'"
+                )
+            )
+            == 0
+        )
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM dataset_objects WHERE sha256 = :sha"),
+                {"sha": ORPHAN_OBJECT},
+            )
+            == 1
         )
     engine.dispose()

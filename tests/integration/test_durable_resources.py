@@ -1,5 +1,6 @@
 import os
 import threading
+import uuid
 
 import pytest
 from alembic import command
@@ -10,7 +11,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.main import app
-from packages.database.models import AuditEvent, Cohort, DatasetObject, Finding, Job
+from packages.database.models import Analysis, AuditEvent, Cohort, DatasetObject, Finding, Job
 from packages.database.session import session_factory
 from packages.provenance.hashing import canonical_hash
 from packages.resources.service import (
@@ -222,6 +223,45 @@ def cohort_request() -> CohortCreate:
     )
 
 
+def finding_payload(gene: str = "ENSG1", family: tuple[str, ...] = ("ENSG1",)):
+    from packages.schemas.finding import Finding as FindingPayload
+
+    return FindingPayload(
+        snapshot_id="DS-TCGA-LUAD-test",
+        finding_type="cnv_expression_association",
+        gene=gene,
+        cohort_size=2,
+        eligible_cases=1,
+        eligible_case_ids=("c1",),
+        eligible_sample_ids=("s1",),
+        n_effective=1,
+        effect_size=0.5,
+        confidence_interval=(0.1, 0.9),
+        p_value=0.01,
+        q_value=0.02,
+        missing_n=1,
+        missing_fraction=0.5,
+        analysis_version="cnv-rna-v1",
+        input_object_hashes=(f"sha256:{'b' * 64}",),
+        tested_gene_ids=family,
+        result_hash=f"sha256:{'d' * 64}",
+    )
+
+
+def cnv_rna_analysis(service: DurableResourceService, key: str) -> Analysis:
+    cohort = service.create_cohort(cohort_request())
+    return service.create_analysis(
+        AnalysisCreate(
+            snapshot_id="DS-TCGA-LUAD-test",
+            cohort_id=cohort.cohort_id,
+            engine="cnv_rna",
+            engine_version="1",
+            input_materializations=seed_cnv_rna_inputs(service.session),
+        ),
+        key,
+    )
+
+
 @pytest.mark.parametrize(
     "cases,samples",
     [
@@ -346,6 +386,25 @@ def test_manifest_resolves_durable_snapshot_and_rejects_uuid_before_network(fact
         asyncio.run(run())
 
 
+def reference_unreferenced_objects(snapshot_id: str) -> None:
+    """Attach a reference to every orphan object so a guarded 0006 downgrade can restore it."""
+    engine = create_engine(DATABASE_URL)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO snapshot_artifacts"
+                " (snapshot_id, logical_role, sha256, storage_backend, storage_key)"
+                " SELECT :snapshot, 'test-object:' || obj.sha256, obj.sha256, 'filesystem',"
+                " 'test/' || obj.sha256"
+                " FROM dataset_objects obj"
+                " WHERE NOT EXISTS ("
+                "   SELECT 1 FROM snapshot_artifacts sa WHERE sa.sha256 = obj.sha256)"
+            ),
+            {"snapshot": snapshot_id},
+        )
+    engine.dispose()
+
+
 def test_migration_0004_roundtrip_preserves_historical_analysis(factory):
     with factory.begin() as session:
         seed_snapshot(session)
@@ -363,6 +422,11 @@ def test_migration_0004_roundtrip_preserves_historical_analysis(factory):
         )
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+    # Materialization sources and diagnostics carry no snapshot reference, so the
+    # guarded 0006 downgrade refuses to fabricate their locators.
+    with pytest.raises(RuntimeError, match="no snapshot_artifacts reference"):
+        command.downgrade(config, "0003")
+    reference_unreferenced_objects("DS-TCGA-LUAD-test")
     command.downgrade(config, "0003")
     command.upgrade(config, "head")
     with factory() as session:
@@ -511,6 +575,7 @@ cohort_size=2,
             missing_fraction=0.5,
             analysis_version="cnv-rna-v1",
             input_object_hashes=(f"sha256:{'b' * 64}",),
+            tested_gene_ids=("ENSG1",),
             result_hash=f"sha256:{'d' * 64}",
         )
         # A queued analysis cannot publish; publication happens while running.
@@ -546,6 +611,104 @@ cohort_size=2,
         )
         assert [value.finding_id for value in matches] == [expected_id]
         assert session.scalar(select(func.count()).select_from(AuditEvent)) >= 6
+
+
+def test_publication_requires_engine_declared_tested_family(factory) -> None:
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        analysis = cnv_rna_analysis(service, "family-key-0001")
+        service.transition_analysis(str(analysis.analysis_id), "running")
+        family = ("ENSG1", "ENSG2")
+        declared = finding_payload("ENSG1", family)
+        # A batch truncated below the engine-declared family must not be signed.
+        with pytest.raises(ResourceConflictError, match="tested universe"):
+            service.publish_findings(analysis, [declared])
+        published = service.publish_findings(analysis, [declared, finding_payload("ENSG2", family)])
+        assert {row.gene_id for row in published} == {"ENSG1", "ENSG2"}
+        assert session.scalar(select(func.count()).select_from(Finding)) == 2
+
+
+def test_snapshot_registration_rejects_duplicate_roles(factory) -> None:
+    snapshot = SnapshotRecord(
+        snapshot_id="DS-duplicate-role",
+        snapshot_hash=canonical_hash({"duplicate": "role"}),
+        project_id="TCGA-LUAD",
+        source_api="https://api.gdc.cancer.gov",
+        gdc_release="fixture",
+        query={"access": "open"},
+        transformation_version="logical-v1",
+        objects=(),
+    )
+    registrations = [artifact("manifest", "a"), artifact("manifest", "b")]
+    with factory.begin() as session, pytest.raises(ResourceConflictError, match="duplicate"):
+        DurableResourceService(session).register_snapshot(snapshot, registrations)
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(DatasetObject)) == 0
+
+
+def test_findings_gene_filter_matches_published_finding(factory) -> None:
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        analysis = cnv_rna_analysis(service, "gene-filter-key-0001")
+        service.transition_analysis(str(analysis.analysis_id), "running")
+        published = service.publish_findings(analysis, [finding_payload("ENSG1")])
+        expected = published[0].finding_id
+    with TestClient(app) as client:
+        response = client.get("/v1/findings", params={"gene": "ENSG1"})
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert [item["finding_id"] for item in items] == [expected]
+        assert items[0]["gene_id"] == "ENSG1"
+        assert client.get("/v1/findings", params={"gene": "ENSG2"}).json()["items"] == []
+
+
+def test_requested_analysis_can_transition_to_running_and_failed(factory) -> None:
+    with factory.begin() as session:
+        seed_snapshot(session)
+        cohort = DurableResourceService(session).create_cohort(cohort_request())
+        legacy = Analysis(
+            analysis_id=uuid.uuid4(),
+            snapshot_id="DS-TCGA-LUAD-test",
+            cohort_id=cohort.cohort_id,
+            engine="cnv_rna",
+            engine_version="1",
+            state="requested",
+            parameters={},
+            expected_input_artifacts=[],
+            input_materializations=[],
+        )
+        session.add(legacy)
+        session.flush()
+        service = DurableResourceService(session)
+        service.transition_analysis(str(legacy.analysis_id), "running")
+        assert legacy.started_at is not None
+        service.transition_analysis(
+            str(legacy.analysis_id), "failed", error="legacy input unavailable"
+        )
+        assert legacy.state == "failed"
+
+
+def test_completed_result_reports_every_published_finding(factory) -> None:
+    from packages.resources.execution import AnalysisExecutionService
+
+    with factory.begin() as session:
+        seed_snapshot(session)
+        service = DurableResourceService(session)
+        analysis = cnv_rna_analysis(service, "completed-result-key-0001")
+        service.transition_analysis(str(analysis.analysis_id), "running")
+        family = tuple(f"ENSG{i:05d}" for i in range(1001))
+        payloads = [finding_payload(gene, family) for gene in family]
+        assert len(service.publish_findings(analysis, payloads)) == 1001
+        service.transition_analysis(str(analysis.analysis_id), "completed")
+        analysis_id = analysis.analysis_id
+    with factory() as session:
+        result = AnalysisExecutionService._completed_result(
+            session, session.get(Analysis, analysis_id)
+        )
+    assert result["published"] == 1001
+    assert len(result["finding_ids"]) == 1001
 
 
 def test_findings_and_cohorts_are_database_immutable(factory) -> None:
@@ -586,6 +749,7 @@ gene="ENSG1",
                     missing_fraction=0.5,
                     analysis_version="cnv-rna-v1",
                     input_object_hashes=(f"sha256:{'b' * 64}",),
+                    tested_gene_ids=("ENSG1",),
                     result_hash=f"sha256:{'e' * 64}",
                 )
             ],
@@ -964,7 +1128,7 @@ def test_migration_0003_roundtrip_preserves_pr7(factory):
         )
     command.upgrade(config, "head")
     with factory() as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0007"
         assert session.scalar(text("SELECT count(*) FROM materializations")) == 0
         assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
 
