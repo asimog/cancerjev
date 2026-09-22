@@ -389,6 +389,50 @@ def test_project_snapshot_and_artifact_registry(factory) -> None:
         )
 
 
+def test_artifact_reference_owns_role_and_locator(factory) -> None:
+    """Same bytes under two roles keep each reference's own role and storage location."""
+    shared = "sha256:" + "9" * 64
+    snapshot = SnapshotRecord(
+        snapshot_id="DS-ref-owner",
+        snapshot_hash=canonical_hash({"ref": "owner"}),
+        project_id="TCGA-LUAD",
+        source_api="https://api.gdc.cancer.gov",
+        gdc_release="fixture",
+        query={"access": "open"},
+        transformation_version="logical-v1",
+        objects=(),
+    )
+    registrations = [
+        ArtifactRegistration(
+            sha256=shared,
+            size=10,
+            media_type="application/octet-stream",
+            logical_role="manifest",
+            storage_backend="filesystem",
+            storage_key="legacy/manifest.tsv",
+        ),
+        ArtifactRegistration(
+            sha256=shared,
+            size=10,
+            media_type="application/octet-stream",
+            logical_role="provenance",
+            storage_backend="filesystem",
+            storage_key="legacy/provenance.json",
+        ),
+    ]
+    with factory.begin() as session:
+        service = DurableResourceService(session)
+        service.register_snapshot(snapshot, registrations)
+        references = {
+            reference.logical_role: reference
+            for reference in service.artifacts.list_for_snapshot(snapshot.snapshot_id)
+        }
+    assert set(references) == {"manifest", "provenance"}
+    assert references["manifest"].storage_key == "legacy/manifest.tsv"
+    assert references["provenance"].storage_key == "legacy/provenance.json"
+    assert {reference.sha256 for reference in references.values()} == {shared}
+
+
 def test_cohort_identity_and_concurrent_creation(factory) -> None:
     with factory.begin() as session:
         seed_snapshot(session)
@@ -909,7 +953,7 @@ def test_migration_0003_roundtrip_preserves_pr7(factory):
     config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
     command.downgrade(config, "0002")
     with factory() as session:
-        # ORM rows carry post-0005 columns; historical checks use raw SQL.
+        # ORM rows carry post-0006 columns; historical checks use raw SQL.
         assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
         assert (
             session.scalar(
@@ -920,7 +964,7 @@ def test_migration_0003_roundtrip_preserves_pr7(factory):
         )
     command.upgrade(config, "head")
     with factory() as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
         assert session.scalar(text("SELECT count(*) FROM materializations")) == 0
         assert DurableResourceService(session).snapshots.get(snapshot.snapshot_id) is not None
 

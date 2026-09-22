@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from packages.database.models import (
     Analysis,
+    ArtifactReference,
     AuditEvent,
     Cohort,
     DatasetObject,
@@ -59,13 +60,37 @@ class SqlProjectRepository(_Repository):
 
 
 class SqlArtifactRepository(_Repository):
-    def by_snapshot_role(self, snapshot_id: str) -> dict[str, DatasetObject]:
+    @staticmethod
+    def _reference(role: str, backend: str, key: str, obj: DatasetObject) -> ArtifactReference:
+        return ArtifactReference(
+            sha256=obj.sha256,
+            size=obj.size,
+            media_type=obj.media_type,
+            logical_role=role,
+            storage_backend=backend,
+            storage_key=key,
+            source_gdc_uuid=obj.source_gdc_uuid,
+            source_md5=obj.source_md5,
+            parser_schema_version=obj.parser_schema_version,
+            row_count=obj.row_count,
+            created_at=obj.created_at,
+        )
+
+    def by_snapshot_role(self, snapshot_id: str) -> dict[str, ArtifactReference]:
         rows = self.session.execute(
-            select(SnapshotArtifact.logical_role, DatasetObject)
+            select(
+                SnapshotArtifact.logical_role,
+                SnapshotArtifact.storage_backend,
+                SnapshotArtifact.storage_key,
+                DatasetObject,
+            )
             .join(DatasetObject, DatasetObject.sha256 == SnapshotArtifact.sha256)
             .where(SnapshotArtifact.snapshot_id == snapshot_id)
         )
-        return dict(rows.all())
+        return {
+            role: self._reference(role, backend, key, obj)
+            for role, backend, key, obj in rows.all()
+        }
 
     def get(self, sha256: str) -> DatasetObject | None:
         return self.session.get(DatasetObject, sha256)
@@ -85,15 +110,22 @@ class SqlArtifactRepository(_Repository):
                 raise
             return existing
 
-    def list_for_snapshot(self, snapshot_id: str) -> list[DatasetObject]:
-        return list(
-            self.session.scalars(
-                select(DatasetObject)
-                .join(SnapshotArtifact, SnapshotArtifact.sha256 == DatasetObject.sha256)
-                .where(SnapshotArtifact.snapshot_id == snapshot_id)
-                .order_by(SnapshotArtifact.logical_role)
+    def list_for_snapshot(self, snapshot_id: str) -> list[ArtifactReference]:
+        rows = self.session.execute(
+            select(
+                SnapshotArtifact.logical_role,
+                SnapshotArtifact.storage_backend,
+                SnapshotArtifact.storage_key,
+                DatasetObject,
             )
+            .join(DatasetObject, DatasetObject.sha256 == SnapshotArtifact.sha256)
+            .where(SnapshotArtifact.snapshot_id == snapshot_id)
+            .order_by(SnapshotArtifact.logical_role)
         )
+        return [
+            self._reference(role, backend, key, obj)
+            for role, backend, key, obj in rows.all()
+        ]
 
 
 class SqlMaterializationRepository(_Repository):

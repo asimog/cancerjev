@@ -227,7 +227,7 @@ class AnalysisExecutionService:
                 destination = tmp / (modality + ".parquet")
                 _guarded_artifact_operation(
                     "input artifact unusable",
-                    lambda artifact=artifact, destination=destination: reader.stage(
+                    lambda artifact=artifact, destination=destination: reader.stage_object(
                         artifact, destination
                     ),
                 )

@@ -43,7 +43,7 @@ class ArtifactResponse(BaseModel):
     sha256: str
     size: int
     media_type: str
-    logical_role: str
+    logical_role: str | None = None
     source_gdc_uuid: str | None
     source_md5: str | None
     parser_schema_version: str | None

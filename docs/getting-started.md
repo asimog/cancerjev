@@ -29,6 +29,14 @@ CANCERJEV_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/cancerjev_te
 
 Do not point tests at development or production data.
 
+## Provider credentials (local live testing)
+
+Local development runs the real application stack. Live TypeSafe Jev integration uses
+`TYPESAFE_API_KEY`; later generative reasoning (CJ-R20) uses `OPENROUTER_API_KEY`.
+Supply them only as local environment variables and never commit them or place them in
+tracked `.env` files. Automated provider tests use deterministic adapter-boundary
+fakes; routine CI never calls paid providers or downloads large GDC datasets.
+
 ## Web
 
 ```bash

@@ -220,6 +220,12 @@ Run PostgreSQL tests only when required:
 python -m pytest -m postgres -q
 ```
 
+Keep destructive migration roundtrips (marked `migration` and `slow`) out of the normal DB loop:
+
+```bash
+python -m pytest -m "postgres and not slow" -q
+```
+
 Run integration tests only when required:
 
 ```bash

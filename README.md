@@ -44,7 +44,10 @@ Important current limitations after CJ-R00:
 - the canonical minimal-transfer planner and bounded open-BAM slicing contract remain
   assigned to CJ-R04; current code fails closed on complete BAM and quarantines the
   generic complete-file transfer operation;
-- only the narrow existing `cnv_rna` artifact execution contract is registered;
+- only the narrow existing `cnv_rna` artifact execution contract is registered; the
+  V1 discovery families are documented in the
+  [discovery catalogue](docs/scientific/discovery-catalogue-v1.md) but are not
+  implemented;
 - Compose remains a local-development topology, not a production deployment.
 
 These are planned facts, not deployed capabilities. See the
@@ -61,13 +64,23 @@ DatasetSnapshot -> verified public source -> canonical Materialization
         |                                      |
         +---------- frozen Cohort -------------+
                                |
-                         Analysis request
+                  registered deterministic search (SearchRun)
                                |
-                 fenced artifact execution
+               complete results -> correction + QC
                                |
-                               v
-Finding -> Search/Jev/native research loop -> validation -> researcher handoff
+                  deterministic candidate gate
+                               |
+              CandidateObservation -> CandidateState
+                               |
+            Jev semantic triage -> bounded follow-up
+                               |
+     Findings / evidence -> reasoning -> HypothesisLock -> validation -> handoff
 ```
+
+Deterministic code performs and gates the broad search. Jev judges only the compact
+candidate shortlist. Generative reasoning proposes explanations only after evidence
+exists, and hidden validation is the final authority. The V1 discovery families are
+defined in the [discovery catalogue](docs/scientific/discovery-catalogue-v1.md).
 
 Current ownership:
 
@@ -84,6 +97,7 @@ Current ownership:
 
 - [Product mission and milestones](docs/plan/PRODUCT_PLAN.md)
 - [CJ-R00–CJ-R33 implementation roadmap](docs/plan/IMPLEMENTATION_ROADMAP.md)
+- [V1 discovery catalogue](docs/scientific/discovery-catalogue-v1.md)
 - [Plain-language guide](docs/plan/PLAIN_LANGUAGE_GUIDE.md)
 - [Individual CJ specifications](docs/plan/cjs/README.md)
 - [Open-data policy](docs/protocol/open-data-policy.md)
@@ -118,6 +132,13 @@ npm run test:browser
 For database tests, point `CANCERJEV_DATABASE_URL` at a disposable PostgreSQL
 database; the suite recreates its public schema. See
 [Getting started](docs/getting-started.md) for the safe procedure.
+
+Local development runs the real application stack (Next.js, FastAPI, PostgreSQL,
+MinIO/filesystem storage, and background workers). Live provider integration uses
+`TYPESAFE_API_KEY` (Jev) and later `OPENROUTER_API_KEY` (generative reasoning) from
+local environment variables. Never commit keys, and never add a GDC token anywhere.
+Automated tests exercise provider adapters through deterministic fakes; routine CI
+never calls paid providers or downloads large GDC datasets.
 
 `docker compose up --build -d --wait` starts the verified local development topology.
 Host bindings default to loopback and ports can be isolated with

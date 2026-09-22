@@ -16,6 +16,13 @@ coverage. Validation accepts only an intact digest and produces pass/fail/inconc
 unavailable with immutable outputs. Replication additionally requires compatible
 schema and independent lineage proven before reveal.
 
+## Researcher visibility
+
+Before validation, show the hypothesis, direction, endpoint, method, cohort/partition,
+and success rule with validation state hidden. After lock, show the immutable lock
+identity/digest and only then allow execution/reveal. The interface displays lock state
+and never alters it.
+
 ## Open-data rule
 
 Validation and replication use public data only. A lock cannot add controlled data;
@@ -25,5 +32,6 @@ replication remains unavailable until a compatible independent public dataset ex
 
 Any lock mutation changes digest and blocks execution; early reveal, data reuse,
 lineage dependence, endpoint switching, family changes, partial overclaims,
-restricted substitution, repeated peeking, and concurrent validation are tested. One
-lock has one authoritative terminal outcome.
+restricted substitution, repeated peeking, concurrent validation, and validation
+reveal before an intact lock are tested. One lock has one authoritative terminal
+outcome.

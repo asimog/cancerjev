@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from packages.database.models import ArtifactReference, DatasetObject
 from packages.gdc.identity import FrozenIdentityResolver
 from packages.gdc.policy import official_api, require_open
 from packages.provenance.hashing import sha256_file
@@ -14,9 +15,30 @@ from packages.storage.config import StorageSettings
 from packages.storage.objects import ObjectStore, object_key
 
 
+def cas_reference(obj: DatasetObject, settings: StorageSettings) -> ArtifactReference:
+    """Content-addressed objects (materialization/source outputs) locate by digest."""
+    return ArtifactReference(
+        sha256=obj.sha256,
+        size=obj.size,
+        media_type=obj.media_type,
+        logical_role=None,
+        storage_backend=settings.object_backend,
+        storage_key=object_key(obj.sha256),
+        source_gdc_uuid=obj.source_gdc_uuid,
+        source_md5=obj.source_md5,
+        parser_schema_version=obj.parser_schema_version,
+        row_count=obj.row_count,
+        created_at=obj.created_at,
+    )
+
+
 class FrozenSnapshotReader:
     def __init__(self, resources, store: ObjectStore, settings: StorageSettings):
         self.resources, self.store, self.settings = resources, store, settings
+
+    def stage_object(self, obj, destination: Path) -> None:
+        """Stage a content-addressed object whose location is derived from its digest."""
+        self.stage(cas_reference(obj, self.settings), destination)
 
     def stage(self, artifact, destination: Path) -> None:
         if artifact.storage_key == object_key(artifact.sha256):

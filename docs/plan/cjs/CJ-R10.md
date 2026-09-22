@@ -5,6 +5,9 @@
 ## Mission
 
 Deliver scientifically explicit survival analyses rather than generic model calls.
+This is discovery family D09 of the
+[V1 discovery catalogue](../../scientific/discovery-catalogue-v1.md); broad discovery
+never simplifies R10 into a generic survival-library call.
 
 ## Implementation
 

@@ -12,6 +12,8 @@ artifacts, and correctable without mutation.
 
 - Finalize Finding identity over manifest, cohort, engine, parameters, eligibility,
   correction family, environment, coverage, and canonical outputs.
+- Findings promoted from search results also bind the originating SearchRun, candidate
+  identity, tested/excluded universe, and candidate-gate policy/version.
 - Add reproduction attempts with expected/actual hashes, field-level mismatch,
   engine availability, logs, and terminal statuses.
 - Reproduction loads exact stored bytes and versions; it never silently substitutes
@@ -27,5 +29,6 @@ does not call authenticated GDC or replace unavailable artifacts with new releas
 
 Exact replay matches; modified bytes, engine/version drift, missing environment,
 partial coverage, unavailable artifacts, and tampering produce explicit outcomes.
-Concurrent publication creates one Finding; update/delete is rejected; supersession
-preserves history.
+Search-derived Findings reproduce with their originating SearchRun identity and gate
+policy intact. Concurrent publication creates one Finding; update/delete is rejected;
+supersession preserves history.

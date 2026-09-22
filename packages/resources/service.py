@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from packages.database.models import (
     Analysis,
+    ArtifactReference,
     AuditEvent,
     Cohort,
     DatasetObject,
@@ -45,6 +46,7 @@ from packages.schemas.resources import (
 from packages.schemas.snapshot import SnapshotRecord
 from packages.statistics.registry import resolve_engine
 from packages.storage.config import StorageSettings
+from packages.storage.objects import object_key
 from scientific.crossmodal.analysis import EngineContext, result_identity, runtime_environment
 
 
@@ -95,7 +97,17 @@ class DurableResourceService:
         )
 
     def register_artifact(self, value: ArtifactRegistration) -> DatasetObject:
-        return self.artifacts.save(DatasetObject(**value.model_dump()))
+        return self.artifacts.save(
+            DatasetObject(
+                sha256=value.sha256,
+                size=value.size,
+                media_type=value.media_type,
+                source_gdc_uuid=value.source_gdc_uuid,
+                source_md5=value.source_md5,
+                parser_schema_version=value.parser_schema_version,
+                row_count=value.row_count,
+            )
+        )
 
     def register_snapshot(
         self, snapshot: SnapshotRecord, artifacts: list[ArtifactRegistration]
@@ -104,8 +116,9 @@ class DurableResourceService:
         for item in snapshot.objects:
             require_open(item.access)
         self.save_project(snapshot.project_id)
+        registrations = {artifact.logical_role: artifact for artifact in artifacts}
         by_role = {
-            artifact.logical_role: self.register_artifact(artifact) for artifact in artifacts
+            role: self.register_artifact(artifact) for role, artifact in registrations.items()
         }
         record = DatasetSnapshot(
             snapshot_id=snapshot.snapshot_id,
@@ -136,11 +149,14 @@ class DurableResourceService:
             if link and link.sha256 != artifact.sha256:
                 raise ResourceConflictError(f"published snapshot artifact role changed: {role}")
             if link is None:
+                registration = registrations[role]
                 self.session.add(
                     SnapshotArtifact(
                         snapshot_id=saved.snapshot_id,
                         logical_role=role,
                         sha256=artifact.sha256,
+                        storage_backend=registration.storage_backend,
+                        storage_key=registration.storage_key,
                     )
                 )
         self.session.flush()
@@ -148,7 +164,7 @@ class DurableResourceService:
             self._audit("snapshot.registered", "snapshot", saved.snapshot_id)
         return saved
 
-    def snapshot_artifacts(self, snapshot_id: str) -> dict[str, DatasetObject]:
+    def snapshot_artifacts(self, snapshot_id: str) -> dict[str, ArtifactReference]:
         if self.snapshots.get(snapshot_id) is None:
             raise ResourceNotFoundError("snapshot not found")
         return self.artifacts.by_snapshot_role(snapshot_id)
@@ -236,6 +252,8 @@ class DurableResourceService:
                         snapshot_id=value.snapshot_id,
                         logical_role="materialization:" + value.materialization_id,
                         sha256=output.sha256,
+                        storage_backend=self.storage_settings.object_backend,
+                        storage_key=object_key(output.sha256),
                     )
                 )
                 self._audit(

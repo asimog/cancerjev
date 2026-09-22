@@ -1,15 +1,19 @@
 # Researcher guide
 
-The current UI lists live public TCGA projects and can create a frozen logical
-snapshot. The API also exposes durable resource operations. Supported artifact-backed
-analyses now execute through a fenced worker, but a queued or running Analysis is not
-a completed scientific result; use only the immutable published Finding.
+The web application is the real research product and is built incrementally with the
+science: a minimal run view at R05, modality result views at R08–R10, discovery,
+SearchRun, and candidate views at R12, Jev judgment and bounded follow-up views at
+R13–R15, and hypothesis-lock/validation views at R24. CJ-R26 consolidates and hardens
+these into the complete cockpit. The UI only presents typed read models; it never
+computes or overrides authoritative scientific values.
 
-Until CJ-R26, use the UI only for source exploration and snapshot creation. Every
-result must be read with access, coverage, eligible population, missingness, method,
-and provenance. `not examined`, `unavailable`, `not acquired`, and `negative` are
-different states.
+Until a view exists for what you need, use the API read models directly. A queued or
+running Analysis or SearchRun is not a completed scientific result; use only the
+immutable published Finding.
 
-The planned researcher workflow is described in the
-[product plan](plan/PRODUCT_PLAN.md) and [CJ-R26](plan/cjs/CJ-R26.md). CancerJev is
-research-only and must not be used for diagnosis or treatment decisions.
+Every result must be read with access, coverage, eligible population, missingness,
+method, and provenance. `not examined`, `unavailable`, `not acquired`, and `negative`
+are different states. The wider discovery model is described in the
+[discovery catalogue](scientific/discovery-catalogue-v1.md) and the
+[product plan](plan/PRODUCT_PLAN.md). CancerJev is research-only and must not be used
+for diagnosis or treatment decisions.

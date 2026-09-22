@@ -26,7 +26,6 @@ DATABASE_URL = os.getenv("CANCERJEV_DATABASE_URL")
 pytestmark = [
     pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured"),
     pytest.mark.postgres,
-    pytest.mark.integration,
 ]
 
 

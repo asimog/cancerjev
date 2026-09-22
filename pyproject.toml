@@ -45,6 +45,7 @@ testpaths = ["tests"]
 markers = [
   "postgres: real PostgreSQL required because database semantics are part of the assertion",
   "integration: several real CancerJev components exercised together",
+  "migration: Alembic upgrade/downgrade roundtrips and legacy-row preservation",
   "slow: deliberately expensive acceptance/build/stress behavior outside the normal coding loop",
 ]
 

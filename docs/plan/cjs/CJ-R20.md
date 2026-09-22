@@ -15,6 +15,13 @@ falsifiers, experiment proposals, literature needs, and next-action suggestions;
 validate Submission; record prompts/state/model/usage/budgets in the Reasoning Ledger.
 Provider prose remains untrusted until validation.
 
+Allowed generative questions come only after evidence exists: mechanisms, competing
+explanations, discriminating predictions, falsifiers, experiment proposals, literature
+needs, and next actions. Prohibited uses: statistical calculation, q-values,
+deterministic candidate generation, tested-universe definition, and scientific
+publication. The OpenRouter-backed reasoning adapter is the intended provider behind
+application-owned contracts; generative reasoning must not move earlier than this CJ.
+
 ## Open-data rule
 
 The agent cannot request credentials, controlled data, full BAMs, arbitrary regions,

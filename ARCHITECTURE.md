@@ -19,7 +19,7 @@ Baseline: `2bf6c68d93741b9974f46983e0a35c691d69c1f1`.
 | Validation firewall | none | Not implemented | R07, R24–R25 |
 | Jev | none | No SDK, adapter, service, or semantic ledger | R13–R15 |
 | Research loop | none | No claims, evidence graph, state, actions, or native agent | R16–R25 |
-| Researcher product | minimal `apps/web` | Project list and snapshot creation only; reproducible lint/build/browser gate | R26–R27 |
+| Researcher product | minimal `apps/web` | Project list and snapshot creation only; reproducible lint/build/browser gate | incremental checkpoints R05, R08–R10, R12–R15, R24; R26–R27 cockpit and handoff |
 | Distributed network | none | External client is intentionally absent | R28–R32 |
 | Production release | Compose development stack | No production release evidence | R33 |
 
@@ -75,14 +75,24 @@ Owns eligibility, tested universes, measurements, estimators, confidence interva
 multiple-testing correction, QC, scientific status, and immutable Finding identity.
 Workers are replaceable execution adapters and may not redefine these rules.
 
+Broad discovery is deterministic. Registered engines execute over frozen artifacts and
+produce complete result artifacts; a method-specific deterministic candidate gate then
+converts only qualifying results into CandidateObservations. V1 discovery families and
+their minimum method contracts are defined once in the
+[discovery catalogue](docs/scientific/discovery-catalogue-v1.md). Jev never selects,
+rejects, or promotes search results.
+
 ### Semantic Judgment
 
 Owner: the planned application-owned `JevService`; TypeSafe is an adapter.
 
-Jev receives compact, typed CandidateState. It never receives GDC credentials, raw
-BAMs, unrestricted matrices, or authority to change deterministic evidence. Provider
-responses enter an append-only Semantic Ledger and are interpreted by versioned
-CancerJev policy.
+Jev receives compact, typed CandidateState assembled from the gated candidate
+shortlist. It never receives GDC credentials, raw BAMs, unrestricted matrices,
+complete SearchRun result tables, or authority to change deterministic evidence.
+Independent typed questions over one CandidateState are normally batched in one
+request. Provider responses enter an append-only Semantic Ledger and are interpreted by
+versioned CancerJev policy; no universal confidence threshold exists, and each action
+is calibrated separately.
 
 ### Native Research Loop
 
@@ -97,6 +107,11 @@ Owners: `apps/api` for delivery contracts and `apps/web` for presentation.
 
 The UI never owns scientific or access state. It displays authoritative labels and
 cannot convert `not examined` or `unavailable` into `negative`.
+
+Thin functional research surfaces appear alongside the scientific milestones that make
+them meaningful: a minimal run view at R05, modality views at R08–R10, discovery views
+at R12, Jev and follow-up views at R13–R15, and hypothesis-lock views at R24. R26
+consolidates and hardens these into the complete researcher cockpit.
 
 ### Optional Distributed Execution
 
@@ -116,6 +131,8 @@ bounded EvidencePackets, not database access or GDC authority.
 | Resource metadata | PostgreSQL repositories through resource service | Transactional; invariants enforced in service and DB |
 | Cohort definition | cohort resource | Immutable scientific membership |
 | Analysis manifest | deterministic execution service | Frozen before execution |
+| SearchRun and complete result artifact | discovery service; CAS bytes | Registered method/version over a frozen cohort; result artifact immutable |
+| CandidateObservation | discovery service | Deterministic candidate-gate output; never created or edited by Jev |
 | Finding | Finding service | Immutable; corrections supersede/retract |
 | Semantic evaluation | Semantic Ledger | Append-only; never edits Finding truth |
 | Claims/evidence | Evidence core | Versioned append/supersession semantics |
@@ -147,28 +164,54 @@ GDC /status + /files
 Job payloads remain compact references. Molecular matrices do not enter queue JSON,
 and workers do not own scientific identity or publication rules.
 
-## 5. Target scientific flow
+## 5. Target discovery and research flow
+
+Broad discovery is deterministic. Jev enters only after a deterministic candidate gate
+has produced a compact shortlist; generative reasoning enters only after evidence
+exists.
 
 ```text
 DatasetSnapshot
   -> AcquisitionPlan / AcquisitionReceipt
   -> AnalysisInputManifest
-  -> AnalysisRun or SearchRun
+  -> registered deterministic search (SearchRun)
+  -> complete deterministic result artifact (all tested units)
+  -> multiple-testing correction + QC / coverage / eligibility checks
+  -> method-specific deterministic candidate gate
   -> CandidateObservation
-  -> deterministic candidate gate
-  -> CandidateState
-  -> JevEvaluation
-  -> versioned routing policy
-  -> bounded deterministic expansion
+  -> deterministic combination of compatible observations
+  -> CandidateState (compact derived evidence)
+  -> JevEvaluation (batched atomic typed questions)
+  -> versioned CancerJev routing policy
+  -> bounded deterministic follow-up
+       |- further deterministic analysis
+       |- cross-cohort analysis
+       |- public literature
+       `- bounded BAM slice / read-level analysis
   -> immutable Finding
   -> reproduction
   -> Claims and Evidence
   -> ResearchState
   -> ResearchAction / WorkUnit
-  -> native agent Submission
-  -> validation / replication
+  -> native agent Submission (generative reasoning after evidence exists)
+  -> competing hypotheses, predictions, falsifiers
+  -> registered deterministic test
+  -> HypothesisLock
+  -> hidden validation / replication
   -> researcher handoff
 ```
+
+- A `CandidateObservation` means the result passed the registered deterministic
+  candidate policy. It never means "Jev liked this result."
+- Complete SearchRun result sets stay in immutable artifacts; PostgreSQL holds compact
+  SearchRun metadata and bounded CandidateObservations only.
+- R12 deterministically connects compatible observations about the same gene, region,
+  or entity; the richer Evidence Graph remains R21.
+- Follow-up acquisition stays inside CJ-R04 bounds. A BAM slice supports only its
+  registered variant/depth question; outside its regions the state is `NOT_EXAMINED`.
+- Jev output is recorded as answer, probabilities, confidence, model/version, state
+  hash, question-set version, usage, and errors; versioned policy, not a universal
+  threshold, decides what follows.
 
 Distributed scheduling is an optional adapter after this loop works natively.
 
@@ -204,9 +247,9 @@ architecture, not an ordinary CJ.
 ## 7. Scientific identity and immutability
 
 A scientific result identity must include frozen snapshot/cohort identity, exact
-complete or partial input manifests, source hashes, coverage scope, examined
-universe, engine/version/parameters, eligibility policy, correction family/version,
-relevant runtime identity, and canonical deterministic output.
+complete or partial input manifests, source hashes, coverage scope, examined universe,
+engine/version/parameters, search or analysis identity, eligibility policy, correction
+family/version, relevant runtime identity, and canonical deterministic output.
 
 It excludes Jev answers, agent prose, scheduler state, UI state, and wall-clock noise.
 Changing an identity-bearing field creates a new result. Findings are never edited

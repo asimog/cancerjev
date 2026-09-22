@@ -12,7 +12,8 @@ DATABASE_URL = os.getenv("CANCERJEV_DATABASE_URL")
 pytestmark = [
     pytest.mark.skipif(not DATABASE_URL, reason="real PostgreSQL URL is not configured"),
     pytest.mark.postgres,
-    pytest.mark.integration,
+    pytest.mark.migration,
+    pytest.mark.slow,
 ]
 
 LEGACY_SNAPSHOT = "sha256:" + "1" * 64
@@ -84,7 +85,7 @@ def test_upgrade_from_populated_0004_preserves_and_protects_legacy_rows():
     run_alembic("upgrade", "head")
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
         assert connection.scalar(
             text("SELECT identity_version FROM dataset_snapshots WHERE snapshot_id = 'DS-legacy'")
         ) == 1
@@ -141,9 +142,96 @@ def test_downgrade_roundtrip_never_discards_scientific_rows():
     run_alembic("upgrade", "head")
     engine = create_engine(DATABASE_URL)
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
         assert connection.scalar(text("SELECT count(*) FROM findings")) == before
         with pytest.raises(DBAPIError):
             connection.execute(text("DELETE FROM cohorts"))
         connection.rollback()
+    engine.dispose()
+
+
+def seed_legacy_0005_artifact() -> None:
+    engine = create_engine(DATABASE_URL)
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO projects (project_id, name) VALUES ('TCGA-LUAD', 'legacy')")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO dataset_snapshots (snapshot_id, snapshot_hash, project_id, provenance)"
+                " VALUES ('DS-artifact', :hash, 'TCGA-LUAD', '{}'::jsonb)"
+            ),
+            {"hash": LEGACY_SNAPSHOT},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO dataset_objects (sha256, size, media_type, logical_role,"
+                " storage_backend, storage_key) VALUES (:sha, 10, 'application/octet-stream',"
+                " 'cases', 'filesystem', 'TCGA-LUAD/DS-artifact/cases.parquet')"
+            ),
+            {"sha": LEGACY_RESULT},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO snapshot_artifacts (snapshot_id, logical_role, sha256)"
+                " VALUES ('DS-artifact', 'cases', :sha)"
+            ),
+            {"sha": LEGACY_RESULT},
+        )
+    engine.dispose()
+
+
+def test_0006_moves_locator_onto_reference_without_loss():
+    reset_schema()
+    run_alembic("upgrade", "0005")
+    seed_legacy_0005_artifact()
+    run_alembic("upgrade", "head")
+    engine = create_engine(DATABASE_URL)
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0006"
+        row = connection.execute(
+            text(
+                "SELECT storage_backend, storage_key FROM snapshot_artifacts"
+                " WHERE snapshot_id = 'DS-artifact' AND logical_role = 'cases'"
+            )
+        ).one()
+        assert row.storage_backend == "filesystem"
+        assert row.storage_key == "TCGA-LUAD/DS-artifact/cases.parquet"
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM information_schema.columns WHERE"
+                    " table_name = 'dataset_objects' AND column_name IN"
+                    " ('logical_role', 'storage_backend', 'storage_key')"
+                )
+            )
+            == 0
+        )
+        with pytest.raises(DBAPIError):
+            connection.execute(text("UPDATE snapshot_artifacts SET storage_key = 'moved'"))
+        connection.rollback()
+    engine.dispose()
+
+    run_alembic("downgrade", "0005")
+    engine = create_engine(DATABASE_URL)
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
+        restored = connection.execute(
+            text(
+                "SELECT storage_backend, storage_key FROM dataset_objects WHERE sha256 = :sha"
+            ),
+            {"sha": LEGACY_RESULT},
+        ).one()
+        assert restored.storage_backend == "filesystem"
+        assert restored.storage_key == "TCGA-LUAD/DS-artifact/cases.parquet"
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM information_schema.columns WHERE"
+                    " table_name = 'snapshot_artifacts' AND column_name IN"
+                    " ('storage_backend', 'storage_key')"
+                )
+            )
+            == 0
+        )
     engine.dispose()
