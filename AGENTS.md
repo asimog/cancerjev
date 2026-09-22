@@ -1,507 +1,269 @@
-# AGENTS.md — CancerJev Engineering Rules
+# AGENTS.md — CancerJev
 
-This file defines the default engineering rules for AI coding agents working in the CancerJev repository.
+Repository-wide rules for coding agents working on CancerJev.
 
-These rules apply to every CJ milestone unless the target CJ explicitly states otherwise. A later CJ may refine earlier behavior, but it must not silently weaken established scientific, reproducibility, security, provenance, or public-data invariants.
+## 1. Start from the target requirement
 
-## 1. Work one CJ at a time
+For CJ work:
 
-Before coding:
+1. Read the target `CJ-RXX.md`.
+2. Inspect the code and tests directly relevant to it.
+3. Read predecessor CJs, `CJ-R00.md`, ADRs, or broader architecture docs only when they materially constrain the target or are explicitly referenced.
+4. Audit current behavior before editing.
+5. Identify what is implemented, partial, incorrect, or missing.
+6. Make a concrete implementation plan before changing code.
 
-1. Read the target `docs/plan/cjs/CJ-RXX.md`.
-2. Read `CJ-R00.md`.
-3. Read only the predecessor CJs that materially constrain the target.
-4. Read `ARCHITECTURE.md`, relevant ADRs, current implementation, migrations, and tests.
-5. Audit current code before proposing changes.
-6. Classify each target requirement as:
-   - implemented
-   - partial
-   - missing
-   - conflicting
-7. Produce an implementation plan before modifying code.
+Do not pre-implement unrelated future CJs.
 
-Do not pre-implement later CJ milestones.
+Do not assume existing tests prove the CJ is correctly implemented.
 
-Stop when the target CJ acceptance criteria pass.
+## 2. Implement the correct solution
 
-## 2. Preserve authority boundaries
+The goal is not the smallest patch.
 
-CancerJev has distinct authorities.
+Implement the simplest robust architecture that:
 
-### Deterministic Science
+* fully satisfies the target requirement
+* preserves valid existing behavior
+* fits the existing architecture
+* is maintainable and testable
+* avoids unnecessary complexity
+* does not introduce unrelated functionality
 
-Owns:
+If the existing design is wrong for the requirement, fix the design rather than layering workarounds over it.
 
-- scientific measurements
-- eligibility
-- tested universes
-- statistical calculations
-- confidence intervals
-- multiple-testing correction
-- QC
-- scientific identity
-- Finding publication
-- reproduction and validation outcomes
+Do not preserve a bad abstraction merely because it already exists.
 
-Deterministic scientific truth must come from versioned deterministic code operating on frozen verified inputs.
+## 3. Scientific authority
 
-### Semantic Judgment
+Authoritative scientific truth must come from deterministic, versioned CancerJev code operating on identified and verified inputs.
 
-Jev may perform bounded semantic tasks over compact typed state.
+Jev may perform bounded semantic judgment but must not:
 
-Jev must not:
+* calculate authoritative statistics
+* alter p-values or q-values
+* redefine cohort membership
+* change tested populations
+* modify Findings
+* manufacture unavailable evidence
+* expand examined coverage
 
-- calculate authoritative statistics
-- change p-values or q-values
-- redefine cohort membership
-- modify Findings
-- infer unavailable data
-- widen examined coverage
-- become scientific authority
+LLMs may propose hypotheses, explanations, experiments, falsifiers, literature needs, and next actions.
 
-### Generative Reasoning
+LLM/Jev output is not authoritative scientific truth unless accepted through explicit deterministic CancerJev logic.
 
-LLMs/research agents may propose:
+Workers execute work.
 
-- mechanisms
-- competing hypotheses
-- predictions
-- falsifiers
-- experiments
-- literature needs
-- next actions
+APIs expose behavior.
 
-Their output is untrusted until validated by CancerJev contracts and policy.
+UI presents behavior.
 
-### Operational State
+None of them should independently own scientific rules.
 
-Jobs, attempts, retries, leases, provider calls, deployments, logs, and incidents are operational state.
+## 4. Preserve scientific states
 
-Operational state must not redefine scientific truth.
-
-## 3. Preserve dependency direction
-
-Preferred dependency direction:
-
-```text
-scientific/domain rules
-    ↓
-application-owned schemas and services
-    ↓
-database / storage / GDC / Jev / provider / transport adapters
-```
-
-Rules:
-
-- Workers are execution adapters, not owners of scientific rules.
-- APIs are delivery boundaries, not scientific authority.
-- UI is presentation, not scientific authority.
-- Scientific engines must not import provider SDKs.
-- Parsers must not open database sessions.
-- Provider SDK response types must not leak into domain contracts.
-- Agents must not construct raw SQL.
-- No module should directly mutate another module's private persistence layout.
-
-## 4. Scientific state distinctions are non-negotiable
-
-Never collapse these states:
-
-- observed positive
-- observed negative
-- missing
-- not acquired
-- not examined
-- unavailable because controlled
-- unavailable because no suitable public source exists
-- failed acquisition
-- failed computation
-
-In particular:
+Never collapse:
 
 ```text
 missing != negative
 unavailable != negative
+not acquired != negative
 not examined != negative
-bounded regional evidence != whole-assay evidence
+failed != negative
+bounded evidence != whole-assay evidence
 ```
 
-Consensus, Jev output, or model confidence cannot create evidence.
+Absence of evidence, model confidence, or semantic consensus cannot create evidence.
 
-## 5. Public GDC data only
+Reported eligibility, counts, exclusions, and missingness must describe the population actually analyzed.
 
-CancerJev uses only freely and anonymously available public GDC data.
+## 5. Scientific identity and history
 
-Every file must explicitly satisfy:
+Scientific execution must use frozen or explicitly identified inputs.
+
+Reproducibility-relevant scientific behavior must have deterministic, centralized identity/versioning.
+
+Do not silently change scientific behavior behind an unchanged method/version identity.
+
+Do not silently rewrite published Findings or equivalent scientific records.
+
+Corrections must use explicit replacement, supersession, retraction, or versioning semantics where required.
+
+Duplicate biological identities must never silently use last-write-wins behavior.
+
+## 6. GDC policy
+
+CancerJev uses anonymously accessible public GDC data only.
+
+Require:
 
 ```text
 access=open
 ```
 
-Missing, unknown, restricted, mixed, or controlled access fails closed.
+Fail closed for unknown, missing, mixed, restricted, or controlled access.
 
-Never add support for:
+Never add:
 
-- GDC tokens
-- `X-Auth-Token`
-- GDC `Authorization` headers
-- cookies
-- token files
-- dbGaP credentials
-- authenticated retry
-- controlled-data UUID acquisition
-- alternate production GDC hosts
-- complete BAM download
-- whole-chromosome slicing
-- open-ended genomic ranges
-- unmapped-read acquisition
-- empty or arbitrary slice scopes
-- unbounded BAM slicing
+* GDC authentication or tokens
+* credential discovery
+* authenticated retry
+* controlled-data acquisition
+* complete BAM downloads
+* whole-chromosome acquisition
+* unbounded or arbitrary genomic slicing
 
-A GDC authorization/access-policy failure is terminal and must not trigger credential seeking or broader acquisition.
+Access-policy failures must not trigger attempts to obtain credentials or broaden acquisition.
 
-Application/service credentials may protect CancerJev infrastructure, but they never authorize GDC data access.
+## 7. Architecture boundaries
 
-## 6. Current product constraint: no end-user login
-
-CancerJev currently does not require end users to create accounts or log in.
-
-Do not introduce:
-
-- registration
-- passwords
-- end-user sessions
-- user-role systems
-- user membership flows
-
-unless a future explicitly approved product decision changes this requirement.
-
-Project/resource isolation, service credentials, quotas, provider budgets, runtime boundaries, and deployment security may still be required without end-user authentication.
-
-## 7. Prefer KISS / DRY / YAGNI / SOLID
-
-Before adding infrastructure, dependencies, frameworks, or abstractions, ask whether the existing architecture can solve the problem cleanly.
-
-Do not add by default:
-
-- Redis
-- Kafka
-- RabbitMQ
-- Kubernetes
-- graph databases
-- generic workflow engines
-- generic agent frameworks
-- arbitrary tool executors
-- new storage systems
-- new authentication frameworks
-
-New infrastructure requires a demonstrated need, not anticipated future scale.
-
-Do not build a generic platform when the CJ requires a narrow CancerJev capability.
-
-## 8. Treat every CJ as a bounded review unit
-
-Recommended branch:
+Prefer:
 
 ```text
-cj-rXX-short-description
+scientific/domain logic
+        ↓
+application-owned services/contracts
+        ↓
+database / storage / GDC / Jev / provider / transport adapters
 ```
 
-A CJ may contain multiple small commits, but unrelated cleanup must not be mixed into it.
+Provider SDK types should not leak into domain contracts.
 
-Before coding, produce a gap matrix:
+Workers should call application/domain behavior rather than reimplement it.
 
-| Requirement | Current state | Gap | Files | Proof required |
-| --- | --- | --- | --- | --- |
+Parsers should not own persistence.
 
-Every requirement should map to implementation evidence and tests.
+APIs should not contain authoritative scientific logic.
 
-## 9. Implement incrementally
+UI should display authoritative state rather than recreate it.
 
-Break each CJ into small logical implementation units.
+Critical rules belong in code/contracts, not only in prompts.
 
-Governing test rule:
+## 8. PostgreSQL and concurrency
 
-```text
-Use the cheapest test layer that can genuinely prove the invariant.
-```
+Use real PostgreSQL when correctness depends on PostgreSQL behavior, including:
 
-Intended test loop:
+* locking
+* transaction races
+* concurrency
+* `FOR UPDATE SKIP LOCKED`
+* leases and attempt ownership
+* stale-worker rejection
+* uniqueness constraints
+* triggers
+* migrations
+
+A stale worker must not be able to publish or mutate state after losing ownership.
+
+Do not require PostgreSQL merely because production eventually persists a result.
+
+## 9. Testing strategy
+
+Tests must prove behavior, not merely execute code.
+
+Use the cheapest test layer that genuinely proves the requirement.
+
+Prefer fast tests for:
+
+* deterministic scientific calculations
+* eligibility and coverage
+* statistics
+* hashing/identity
+* validation
+* duplicate handling
+* policy logic
+* serialization
+* routing
+* provider-response mapping
+
+Use PostgreSQL/integration tests only when real persistence or multi-component behavior matters.
+
+Never weaken a valid test merely to make implementation pass.
+
+## 10. Fast development loop
+
+Do not run the entire repository suite after every edit.
+
+Use:
 
 ```text
 edit
-→ focused test
-→ rerun only failures
-→ related fast regression tests
-→ relevant PostgreSQL/integration tests only when the change requires them
-→ CJ acceptance suite
-→ full regression before merge
+→ smallest affected test
+→ fix failure
+→ rerun failures
+→ related fast tests
+→ required PostgreSQL/integration tests
+→ continue
 ```
 
-For each unit:
-
-1. inspect surrounding code
-2. add or update focused tests
-3. make the smallest coherent change
-4. run focused tests
-5. fix failures before continuing
-6. review the diff
-
-During active coding, prefer:
+Run a focused test:
 
 ```bash
 python -m pytest path/to/test.py::test_name -q -x
 ```
 
-and, for reruns:
+Rerun recent failures:
 
 ```bash
 python -m pytest --lf -q
 ```
 
-Do not run the full repository suite after every small edit.
-
-Do not rerun a 60+ second integration file repeatedly while debugging one or two failing cases; rerun the full affected integration file only after the focused failures pass.
-
-If a run reports `2 failed, 6 passed`, rerun the two failures first, not all eight tests.
-
-Do not implement a whole CJ as one uncontrolled patch.
-
-Once a simple test design satisfies the CJ requirement and focused tests prove it, implement it and move on. Do not repeatedly reconsider settled implementation or testing decisions unless new evidence shows they are wrong.
-
-## 10. Tests must prove positive, boundary, and negative behavior
-
-Every significant CJ feature should include:
-
-### Positive tests
-
-Prove intended behavior works.
-
-### Boundary tests
-
-Cover cases such as:
-
-- duplicates
-- NaN / non-finite values
-- empty cohorts
-- missing assays
-- partial coverage
-- stale generations
-- old schema versions
-- retries
-- worker crashes
-- malformed provider output
-
-### Negative / adversarial tests
-
-Prove forbidden behavior cannot occur.
-
-Examples:
-
-- controlled GDC access
-- auth/token smuggling
-- full BAM acquisition
-- unbounded slices
-- stale worker publication
-- duplicate publication
-- validation leakage
-- fabricated citations
-- scope widening
-- cross-project disclosure
-- unsupported scientific claims
-
-Test each condition at the cheapest layer that can genuinely prove it:
-
-```text
-NaN rejected by scientific engine           → unit/scientific test
-full BAM rejected by acquisition policy     → policy/contract test
-stale worker cannot publish after reclaim   → PostgreSQL integration test
-Jev cannot alter q-value                    → service/domain test
-hidden validation cannot be exposed early  → API/integration test
-```
-
-Never weaken a test merely to make an implementation pass.
-
-## 11. Use real PostgreSQL for persistence/concurrency invariants
-
-Most CancerJev tests should remain pure and fast.
-
-Do not use PostgreSQL merely because production code eventually persists the result.
-
-Examples that normally should NOT require PostgreSQL:
-
-- mutation, CNV, and RNA calculations
-- cross-modal statistics, effect sizes, confidence intervals
-- p/q-value correction
-- deterministic candidate gating and ranking
-- hashing and scientific identity helpers
-- duplicate detection
-- schema/Pydantic validation
-- eligibility, missingness, and coverage logic
-- GDC request-policy validation that does not depend on persistence
-- BAM range/scope validation
-- CandidateState construction
-- Jev question construction
-- provider-response mapping
-- deterministic routing logic
-- scientific serialization
-
-Typical layer mapping:
-
-```text
-CNV/RNA statistic         → pure scientific test
-candidate gate            → pure unit/scientific test
-Finding hash              → pure unit test
-worker lease race         → PostgreSQL test
-immutable Finding trigger → PostgreSQL test
-```
-
-Mocks are not sufficient proof for:
-
-- `FOR UPDATE SKIP LOCKED`
-- lease fencing
-- stale-worker rejection
-- reaping
-- concurrent publication
-- transaction races
-- uniqueness enforcement
-- immutable triggers
-- migration behavior
-
-Fast unit tests are useful, but critical database invariants require real PostgreSQL integration tests.
-
-### Database fixture policy
-
-Preferred normal pattern:
-
-```text
-test session starts
-→ disposable test DB available
-→ migrations applied once
-→ ordinary DB tests use isolated transaction/savepoint where practical
-→ rollback
-→ next test
-```
-
-Do not normally drop schema, recreate schema, and replay all migrations for every ordinary DB test.
-
-Migration tests are separate. Migration-specific tests may deliberately create a clean schema/database and run upgrade/downgrade paths.
-
-Migration tests must not depend on pytest file ordering and must not leave the shared DB at the wrong migration version.
-
-No ordinary integration test may rely on:
-
-- another test file having run first
-- another migration test restoring state later
-- alphabetical module order
-
-## 11a. Test tiers and markers
-
-Markers:
-
-- `postgres` — real PostgreSQL required because database semantics are part of the assertion
-- `integration` — several real CancerJev components exercised together
-- `slow` — deliberately expensive acceptance/build/stress behavior that should not be in the normal coding loop
-
-Unmarked tests should normally be fast.
-
-Normal fast developer command:
+Run fast tests:
 
 ```bash
 python -m pytest -m "not postgres and not integration and not slow" -q
 ```
 
-PostgreSQL tests:
+Run PostgreSQL tests only when required:
 
 ```bash
 python -m pytest -m postgres -q
 ```
 
-Integration tests:
+Run integration tests only when required:
 
 ```bash
 python -m pytest -m integration -q
 ```
 
-Slowest-test report:
+If only a few tests fail, rerun those tests first.
 
-```bash
-python -m pytest --durations=30 -q
-```
+Do not repeatedly rerun a whole slow integration file while debugging one failure.
 
-Full regression — before merge, not the default after every edit:
+## 11. Database test performance
 
-```bash
-python -m pytest -q
-```
+Ordinary DB tests should not recreate the schema and replay all migrations for every test.
 
-## 11b. Integration, provider, browser, and packaging test scope
-
-Integration tests should prove important component boundaries, not repeat every scientific edge case through the whole stack.
-
-Good integration examples:
+Where practical:
 
 ```text
-Analysis
-→ PostgreSQL
-→ Job
-→ worker
-→ deterministic execution
-→ Finding
+initialize disposable DB
+→ apply migrations once
+→ isolate test with transaction/savepoint or targeted cleanup
+→ rollback/reset
 ```
 
-or:
+Migration tests may create clean schemas when testing migration behavior itself.
 
-```text
-SearchRun
-→ worker
-→ result artifact
-→ CandidateObservation
-```
+Do not add parallel test execution until shared-database safety and the actual bottleneck are understood.
 
-Do not repeat every NaN, duplicate, empty-cohort, threshold, or statistical edge case through the full worker/database stack if those are already proven cheaply in scientific/unit tests.
+## 12. Slow or hanging tests
 
-Routine automated tests must not depend on live GDC, TypeSafe/Jev, OpenRouter, or literature providers. Use deterministic adapter-level mocks/fakes for routine automated tests. Live provider tests are separate manual integration tests. Never make normal CI slow, flaky, costly, or dependent on third-party uptime.
-
-Browser tests should cover major researcher journeys, not every backend permutation. Do not use the browser to prove statistical correctness. The frontend is presentation, not scientific authority.
-
-Packaging tests should prove the actual packaging invariant with the smallest reliable approach: build the wheel once, inspect wheel contents/RECORD, and perform one necessary isolated import smoke test if needed. Do not build elaborate venv/PYTHONPATH/meta-path simulations unless an actual packaging regression requires them. Expensive wheel-build tests are not part of the normal fast loop.
-
-## 11c. Runtime discipline and profiling
-
-If a focused test that normally completes in roughly a minute runs for several minutes with no useful output or progress:
+If a focused test that should normally finish quickly runs for several minutes:
 
 1. stop it
-2. inspect the running process
-3. check for:
-   - database deadlock
-   - blocked transaction
-   - hanging subprocess
-   - migration lock
-   - network wait
-   - Docker/service wait
-   - orphan worker
-4. rerun the single affected test with verbose output
+2. identify the exact test
+3. rerun it with `-vv`
+4. inspect for:
 
-Do not let a focused test run for tens of minutes without investigation.
-
-Runtime expectations (guidance, not hard failures):
-
-- pure unit/scientific tests: milliseconds to a few seconds
-- focused PostgreSQL tests: usually seconds
-- small integration file: ideally under tens of seconds
-- around one minute: acceptable but profile
-- multiple minutes for a focused file: investigate
-- tens of minutes: treat as a likely hang or test-design problem
-
-Do not enforce arbitrary hard timeouts without evidence.
-
-While actively debugging a failing test, do not pipe pytest through output filters such as:
-
-```powershell
-... | Select-String -Pattern "passed|failed|FAILED" | Select-Object -First 4
-```
-
-because this can hide traceback details, setup failures, teardown failures, warnings, and hangs. Filtered output is acceptable only for a quick status check after the failure is already understood.
+   * database locks
+   * blocked transactions
+   * repeated migrations
+   * network waits
+   * hanging workers/subprocesses
+   * Docker/service waits
+   * oversized fixtures
+   * repeated artifact generation
 
 Profile before optimizing:
 
@@ -509,379 +271,35 @@ Profile before optimizing:
 python -m pytest --durations=30 -q
 ```
 
-Look for:
+Routine automated tests must not depend on live external services unless explicitly designated as live/manual integration tests.
 
-- repeated migrations
-- schema recreation
-- oversized fixtures
-- repeated Parquet generation
-- repeated object-store setup
-- unnecessary API/worker startup
-- network calls
-- duplicated integration coverage
+## 13. Migrations and providers
 
-Do not add `pytest-xdist` or other new test infrastructure until the actual bottleneck has been measured.
+For schema changes, update all affected layers: models, migrations, repositories/services, read models, fixtures, and tests.
 
-## 12. Job ownership must be fenced
+Prefer forward migrations.
 
-After a job is claimed, later mutations must prove the current attempt.
+Do not rewrite landed migration history unless the repository explicitly treats it as disposable.
 
-Preferred ownership identity:
+External providers must remain behind CancerJev-owned interfaces.
 
-```text
-job_id + worker_id + attempt_token
-```
+Provider failure must not silently change scientific meaning.
 
-The attempt token must be unique per claim.
+Structured provider/model output must be validated before authoritative use.
 
-The current attempt token must be required for operations such as:
+## 14. Completion
 
-- start
-- heartbeat
-- publish
-- succeed
-- fail
-- cancel where applicable
+Before declaring a CJ complete:
 
-A stale worker must be unable to publish after lease loss or reclaim.
+1. Compare the implementation against every acceptance criterion.
+2. Review the complete diff.
+3. Check for unintended scope creep or regression.
+4. Run relevant focused tests.
+5. Run required PostgreSQL/integration tests.
+6. Run applicable lint, typecheck, build, migration, and policy/security checks.
+7. Run the broader regression suite once.
+8. Record known limitations and explicit deferrals.
 
-Expired jobs that have exhausted retries must reach a stable terminal state.
+Passing tests alone does not prove completion if the tests do not prove the actual requirement.
 
-## 13. Scientific inputs are immutable
-
-Scientific execution must use frozen verified artifacts.
-
-Do not put genome-scale molecular matrices into queue payloads.
-
-Prefer compact durable references:
-
-```text
-analysis_id
-materialization_id
-artifact hash
-snapshot/cohort identity
-```
-
-Execution should resolve and verify authoritative inputs from persistence/storage.
-
-Scientific compute should not contact live GDC.
-
-## 14. Duplicate biological identities must not silently collapse
-
-Never use last-write-wins dictionary behavior as a scientific policy.
-
-For biological identity keys:
-
-- exact allowed duplicates may be canonicalized only by an explicit rule
-- conflicting duplicates must fail deterministically
-- aggregation requires a versioned scientific rule
-
-This applies to snapshot identity, molecular observations, and scientific engine inputs.
-
-## 15. Eligibility must match the data actually analyzed
-
-Scientific population metadata must reconcile exactly with statistical inputs.
-
-If filtering removes observations because of:
-
-- NaN
-- infinity
-- missing values
-- invalid values
-- eligibility policy
-- assay availability
-- coverage
-
-then eligible counts, IDs, exclusions, and missingness must describe the post-filter population actually analyzed.
-
-Do not compute statistics over one population and report another.
-
-## 16. Scientific identity must be canonical and centralized
-
-Do not let each engine invent ad hoc result hashes.
-
-Scientific identity should bind all material identity-bearing fields required by the relevant CJ, such as:
-
-- frozen snapshot
-- cohort
-- exact immutable input manifests/hashes
-- complete or partial coverage
-- examined/tested universe
-- engine
-- engine version
-- parameters
-- eligibility policy
-- multiple-testing family/version
-- relevant environment/runtime identity
-- canonical deterministic outputs
-
-Scientific identity normally excludes:
-
-- Jev output
-- LLM prose
-- scheduler priority
-- UI state
-- retry count
-- timestamps
-- worker hostname
-
-Changing an identity-bearing field creates a new result.
-
-## 17. Published scientific records are immutable
-
-Published resources such as Findings must not be edited in place.
-
-Corrections should use explicit relationships such as:
-
-- supersedes
-- superseded_by
-- retracts
-- retracted_by
-
-Critical immutability should be enforced in PostgreSQL as well as application code.
-
-Historical records must remain truthful.
-
-Do not invent missing legacy provenance or silently backfill facts that were never recorded.
-
-## 18. Migrations are part of the feature
-
-For schema changes, update all relevant layers:
-
-- ORM models
-- migration
-- repositories/services
-- API/read models
-- fixtures
-- unit tests
-- integration tests
-- migration tests
-- compatibility behavior
-
-Do not modify already-landed historical migrations merely to make current code easier unless the repository explicitly treats those migrations as unreleased disposable history.
-
-Prefer new forward migrations.
-
-Where supported, verify downgrade behavior.
-
-## 19. External providers stay behind application-owned adapters
-
-This includes:
-
-- GDC
-- S3-compatible storage
-- TypeSafe/Jev
-- OpenRouter
-- literature providers
-- future external contributor transports
-
-Domain code should depend on CancerJev-owned contracts.
-
-Provider failure must not silently alter scientific state.
-
-## 20. Structured model output only for authoritative workflows
-
-For Jev/LLM/agent workflows:
-
-- define strict schemas
-- validate responses
-- reject malformed output
-- version state/prompt/policy contracts where relevant
-- persist provider/model/version/usage where required
-- keep raw prose untrusted
-
-Do not parse important behavior from loosely formatted prose if a typed schema can express it.
-
-## 21. Prompts are not hidden business logic
-
-Do not bury critical rules only inside prompts.
-
-The following belong in versioned application policy/contracts:
-
-- allowed modes
-- allowed actions
-- thresholds
-- budget limits
-- state transitions
-- coverage rules
-- permission boundaries
-- rejection behavior
-
-Prompts may communicate those rules to a model, but they are not the authoritative implementation.
-
-## 22. Agent tools must be narrow and allowlisted
-
-Research agents must not receive generic authority such as:
-
-- unrestricted shell
-- arbitrary HTTP
-- arbitrary SQL
-- unrestricted filesystem
-- arbitrary GDC regions
-- secret access
-
-Expose bounded CancerJev-owned actions instead.
-
-## 23. Keep Evidence Graph implementation simple
-
-An Evidence Graph does not automatically require a graph database.
-
-Authoritative records should remain in the system of record.
-
-Use a deterministic typed projection and existing persistence unless measured requirements justify a new database.
-
-## 24. Validation data must not leak
-
-For hidden validation milestones, test leakage through:
-
-- APIs
-- SQL projections
-- exports
-- logs
-- metrics
-- debug endpoints
-- error messages
-- counts
-- ordering
-- timing where material
-
-Discovery must not infer validation membership or outcomes before a valid lock/reveal.
-
-## 25. UI is derived presentation
-
-The UI may:
-
-- display
-- filter
-- visualize
-- explain
-- request supported actions
-
-The UI must not:
-
-- calculate authoritative scientific state
-- infer missingness
-- reconstruct scientific truth from unrelated endpoints
-- mutate Findings
-- convert unavailable/not-examined states into negatives
-
-Use typed API read models.
-
-## 26. Version scientific methods explicitly
-
-Changes to scientific behavior may require a new method/version identity.
-
-Examples:
-
-- eligibility rules
-- normalization
-- estimator/test
-- covariates
-- threshold
-- missing-data method
-- multiple-testing family
-- coverage interpretation
-
-Do not silently change scientific behavior behind an unchanged method version when reproducibility would be affected.
-
-## 27. Prefer correctness before performance
-
-First establish:
-
-- correct lineage
-- correct identity
-- correct eligibility
-- correct coverage
-- deterministic behavior
-- tests
-
-Then profile.
-
-Optimize measured hotspots only.
-
-Do not introduce distributed compute because future workloads might be large.
-
-## 28. Distributed execution is optional
-
-Native CancerJev must work correctly without external contributor agents.
-
-Do not make optional distributed-agent infrastructure a prerequisite for core scientific correctness or researcher value.
-
-R28–R32 should remain optional unless the product explicitly decides otherwise.
-
-## 29. Fresh review after every CJ
-
-After implementation:
-
-1. start a fresh review session
-2. inspect the complete diff
-3. compare it to the target CJ
-4. compare it to inherited invariants
-5. inspect tests
-6. look for:
-   - regression
-   - scope creep
-   - scientific semantic drift
-   - security weakening
-   - concurrency bugs
-   - accidental future-CJ implementation
-   - tests that pass without proving the real requirement
-
-Make only targeted fixes after review.
-
-## 30. Swarm / parallel edits
-
-Default:
-
-```text
-Swarm OFF
-```
-
-for cross-cutting implementation involving:
-
-- database
-- migrations
-- workers
-- scientific identity
-- concurrency
-- security boundaries
-- architecture
-
-Parallel agents are acceptable only for clearly isolated work with non-overlapping ownership, such as read-only audits, independent documentation, or isolated fixtures.
-
-## 31. Required completion evidence
-
-A CJ is not complete because code exists.
-
-Record:
-
-- acceptance commands
-- tool/runtime versions where relevant
-- test results
-- migration results
-- build results
-- security/policy scan results
-- known limitations
-- explicit deferrals
-
-Distinguish per-edit runs from CJ completion:
-
-- During active implementation: run focused tests and related fast regressions.
-- At CJ completion: run all relevant scientific golden tests, PostgreSQL invariants, integration tests, browser tests where applicable, lint, typecheck, build, security/policy tests, and the broader regression suite.
-
-Do not confuse "what I run after changing one function" with "what proves the CJ is complete."
-
-Update current-truth documentation when implementation behavior changes.
-
-## 32. Final completion rule
-
-Each CJ should leave CancerJev:
-
-- more correct
-- more reproducible
-- more explicit
-- more testable
-- no less secure
-- no less scientifically honest
-
-It should not merely make the repository larger.
+Do not declare completion while known acceptance criteria remain unimplemented.
