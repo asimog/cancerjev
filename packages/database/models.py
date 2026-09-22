@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import (
@@ -56,13 +57,17 @@ class DatasetSnapshot(Base):
 
 
 class DatasetObject(Base):
+    """Content-addressed bytes only.
+
+    Identity is the digest; size and media type are intrinsic. Contextual facts
+    such as the logical role and the storage location belong to the reference
+    that points at these bytes, not to the bytes themselves.
+    """
+
     __tablename__ = "dataset_objects"
     sha256: Mapped[str] = mapped_column(String(71), primary_key=True)
     size: Mapped[int] = mapped_column(BigInteger)
     media_type: Mapped[str] = mapped_column(String(100))
-    logical_role: Mapped[str] = mapped_column(String(100))
-    storage_backend: Mapped[str] = mapped_column(String(30))
-    storage_key: Mapped[str] = mapped_column(String(1000), unique=True)
     source_gdc_uuid: Mapped[str | None] = mapped_column(String(100))
     source_md5: Mapped[str | None] = mapped_column(String(32))
     parser_schema_version: Mapped[str | None] = mapped_column(String(100))
@@ -75,12 +80,42 @@ class DatasetObject(Base):
 
 
 class SnapshotArtifact(Base):
+    """A snapshot's reference to an object: owns role and storage location.
+
+    The same bytes may be referenced by many snapshots and roles, each with its
+    own storage locator, so the locator lives on the reference rather than on
+    the shared content-addressed object.
+    """
+
     __tablename__ = "snapshot_artifacts"
     snapshot_id: Mapped[str] = mapped_column(
         ForeignKey("dataset_snapshots.snapshot_id"), primary_key=True
     )
     logical_role: Mapped[str] = mapped_column(String(100), primary_key=True)
     sha256: Mapped[str] = mapped_column(ForeignKey("dataset_objects.sha256"), index=True)
+    storage_backend: Mapped[str] = mapped_column(String(30))
+    storage_key: Mapped[str] = mapped_column(String(1000))
+
+
+@dataclass(frozen=True)
+class ArtifactReference:
+    """Read model joining object content with the reference that selected it."""
+
+    sha256: str
+    size: int
+    media_type: str
+    logical_role: str | None
+    storage_backend: str
+    storage_key: str
+    source_gdc_uuid: str | None = None
+    source_md5: str | None = None
+    parser_schema_version: str | None = None
+    row_count: int | None = None
+    created_at: datetime | None = None
+
+    @property
+    def object_id(self) -> str:
+        return self.sha256
 
 
 class MaterializationSource(Base):

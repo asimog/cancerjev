@@ -150,7 +150,7 @@ class MaterializationService:
             materialization_id = canonical_hash(lineage)
             # Check source bytes and frozen context on retry without reparsing existing output.
             source_artifact = self.resources.artifacts.get(binding.sha256)
-            self.reader.stage(source_artifact, root / "source")
+            self.reader.stage_object(source_artifact, root / "source")
             if source:
                 verify_file(root / "source", source.md5sum, source.file_size)
             existing = self.resources.get_materialization(materialization_id)
