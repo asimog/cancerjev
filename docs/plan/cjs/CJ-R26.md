@@ -4,18 +4,21 @@
 
 ## Mission
 
-Give researchers a complete, accessible interface to projects, public datasets,
+Consolidate and harden the functional research surfaces already built during earlier
+milestones into a complete, accessible interface to projects, public datasets,
 acquisition, runs, candidates, evidence, Jev reasoning, validation, reproduction, and
-handoff without making the UI an authority.
+handoff — without making the UI an authority.
 
 ## Implementation
 
-Build project dashboard, dataset/snapshot browser, acquisition preview, job timeline,
-analysis/search explorer, candidate/evidence graph, Finding/reproduction, hypothesis
-lock/validation, budgets, audit, and export screens. APIs return typed read models;
-long work is asynchronous; errors and provenance are actionable. Enforce R06 runtime
-isolation and access rules at APIs and downloads. Add accessibility and
-responsive/browser coverage.
+Consolidate the incremental surfaces first: the R05 minimal run view, R08–R10 modality
+result views, R12 discovery/search/candidate views, R13–R15 Jev judgment and bounded
+follow-up views, and R24 hypothesis-lock/validation views. Then complete the project
+dashboard, dataset/snapshot browser, acquisition preview, job timeline, analysis/search
+explorer, candidate/evidence graph, Finding/reproduction, hypothesis lock/validation,
+budgets, audit, and export screens. APIs return typed read models; long work is
+asynchronous; errors and provenance are actionable. Enforce R06 runtime isolation and
+access rules at APIs and downloads. Add accessibility and responsive/browser coverage.
 
 ## Open-data rule
 
@@ -26,5 +29,6 @@ Never show not examined as negative or offer a GDC-token/full-BAM control.
 ## Tests and acceptance
 
 Browser tests cover every state, loading/error/retry, project isolation, keyboard and
-screen-reader semantics, exports, stale updates, and mobile layouts. The CJ-R25 journey
-is understandable and operable entirely through supported UI/API flows.
+screen-reader semantics, exports, stale updates, and mobile layouts. Every earlier
+checkpoint remains reachable and operable after consolidation. The CJ-R25 journey is
+understandable and operable entirely through supported UI/API flows.

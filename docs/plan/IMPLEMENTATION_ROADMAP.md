@@ -22,7 +22,7 @@ scientific-authority, provenance, or validation invariants.
 | [R09](cjs/CJ-R09.md) | B | Cross-modal and covariate-aware engines | R08 |
 | [R10](cjs/CJ-R10.md) | B | Versioned survival methods | R05–R09 |
 | [R11](cjs/CJ-R11.md) | B | Immutable Findings and reproduction | R05, R08–R10 |
-| [R12](cjs/CJ-R12.md) | B | SearchRun and CandidateObservation | R08–R11 |
+| [R12](cjs/CJ-R12.md) | B | SearchRun, deterministic candidate gate, and CandidateObservation | R08–R11 |
 | [R13](cjs/CJ-R13.md) | B | JevService and Semantic Ledger | R01, R06, R12 |
 | [R14](cjs/CJ-R14.md) | B | CandidateState and explicit Jev modes | R12–R13 |
 | [R15](cjs/CJ-R15.md) | B | Budgeted adaptive discovery | R12–R14 |
@@ -36,7 +36,7 @@ scientific-authority, provenance, or validation invariants.
 | [R23](cjs/CJ-R23.md) | C | ResearchAction and WorkUnitFactory | R17, R22 |
 | [R24](cjs/CJ-R24.md) | C | HypothesisLock and validation execution | R07, R11, R21–R23 |
 | [R25](cjs/CJ-R25.md) | C | Native full-loop acceptance | R01–R24 |
-| [R26](cjs/CJ-R26.md) | D | Researcher cockpit | R25 |
+| [R26](cjs/CJ-R26.md) | D | Researcher cockpit consolidation and hardening | R25 |
 | [R27](cjs/CJ-R27.md) | D | Research handoff and reviewed intake | R16, R21, R25–R26 |
 | [R28](cjs/CJ-R28.md) | E | Hidden benchmarks and capability profiles (optional) | R19, R25 |
 | [R29](cjs/CJ-R29.md) | E | Replicated scheduler and diversity (optional) | R17, R25, R28 |
@@ -48,6 +48,18 @@ scientific-authority, provenance, or validation invariants.
 Milestone E (R28–R32) is an optional distributed-contributor program. Native
 production readiness (R33) does not depend on it; when distributed execution is
 enabled, R33 additionally requires the CJ-R32 distributed-release acceptance.
+
+## Discovery model
+
+Broad discovery is deterministic. A SearchRun executes one registered method/version
+over one frozen cohort and tested universe; complete result sets stay in immutable
+artifacts while the method-specific deterministic candidate gate turns only qualifying
+results into CandidateObservations. Jev then judges the compact CandidateState
+shortlist, and later generative reasoning remains CJ-R20. The V1 families (D01–D09) and
+their minimum method contracts are defined once in the
+[V1 discovery catalogue](../scientific/discovery-catalogue-v1.md). Thin functional
+research surfaces accompany R05, R08–R10, R12–R15, and R24; R26 consolidates them into
+the complete cockpit.
 
 ## Global definition of done
 

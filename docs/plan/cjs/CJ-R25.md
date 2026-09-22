@@ -11,10 +11,14 @@ before any external contributor transport exists.
 ## Positive journey
 
 Freeze an explicitly open public fixture; minimally acquire/materialize it; partition
-discovery/validation; run deterministic search; create CandidateState; obtain bounded
-Jev evaluation; schedule a deterministic expansion; publish/reproduce a Finding;
-build Claims/Evidence/ResearchState; issue a WorkUnit to the native agent; validate its
-Submission; lock a hypothesis; run hidden validation; update state; export handoff.
+discovery/validation; run a registered deterministic SearchRun with complete results;
+apply correction, QC, coverage, and eligibility checks and the method-specific
+deterministic candidate gate; create CandidateObservation and compact CandidateState;
+obtain batched bounded Jev evaluations; schedule a registered bounded follow-up (for
+example a targeted BAM variant/depth slice); combine evidence; publish/reproduce a
+Finding; build Claims/Evidence/ResearchState; issue a WorkUnit to the native agent;
+validate its Submission; lock a hypothesis; run hidden validation; update state;
+export handoff.
 
 ## Open-data and negative journeys
 

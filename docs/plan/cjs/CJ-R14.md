@@ -6,16 +6,28 @@ policy. **Depends on:** R12–R13.
 ## Mission
 
 Give Jev a small, typed, reproducible statement of what deterministic code observed
-and which semantic task it may perform.
+and which semantic task it may perform. CandidateState carries relevant derived
+evidence only.
 
 ## Implementation
 
-- Define CandidateState with candidate/family identities, effects, intervals,
-  missingness, QC, covariates, coverage, citations, prior evaluations, and limitations.
-- Define separate modes such as characterize, critique, relevance, evidence relation,
-  and expansion triage, each with allowed questions and answer schemas.
+- Define a compact CandidateState containing only relevant derived evidence: candidate
+  identity, cohort/cancer, originating SearchRun, originating deterministic
+  method/version, effect/statistics, q where applicable, eligible N, missing/excluded
+  counts, QC, coverage, related deterministic observations, and limitations. Do not
+  overfill it and never attach raw matrices or complete result tables.
+- Define separate modes with allowed questions and answer schemas, for example
+  pattern classification (choice), coherence (score with a defined rubric), conflict
+  (noul), follow-up value (score), and follow-up category (choice), refined to current
+  domain terminology. Example classification and follow-up-category options belong to
+  registered domain vocabulary, not free text.
+- Keep every question atomic: never hide coherence, importance, follow-up, and
+  biological mechanism inside one giant question.
+- Batch several independent questions that share one CandidateState into one Jev
+  request while keeping each answer independently interpretable.
 - Hash canonical state and question sets; reject stale or cross-candidate answers.
-- Keep policy routing outside provider prompts.
+- Keep policy routing and all thresholds outside provider prompts; no universal
+  confidence threshold is defined here.
 
 ## Open-data rule
 
@@ -26,5 +38,6 @@ controlled data.
 ## Tests and acceptance
 
 Golden state assembly, schema/version changes, redaction, size bounds, missing fields,
-stale answers, mode separation, partial coverage, and deterministic hashes pass. Every
-answer references the exact state and cannot claim scientific validation.
+stale answers, mode separation, question atomicity, batched-request equivalence,
+threshold independence, partial coverage, and deterministic hashes pass. Every answer
+references the exact state and cannot claim scientific validation.

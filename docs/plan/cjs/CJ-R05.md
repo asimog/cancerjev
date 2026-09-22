@@ -19,6 +19,16 @@ eliminates legacy inline scientific input.
 - Disable network during compute; publish verified output artifacts and Findings in
   one idempotent workflow.
 - Remove legacy molecular rows from jobs and API schemas.
+- Keep the Engine Registry as the single registered scientific-engine mechanism.
+  Discovery methods (R08–R12) register there with method versions and contracts; do
+  not add a parallel discovery-method or search-definition registry.
+
+## Researcher visibility
+
+Provide a minimal read-only run view over typed API read models sufficient to observe
+Analysis -> Job -> worker execution -> deterministic result/Finding locally. This is a
+development and local-testing checkpoint, not a dashboard; the browser never
+recomputes authoritative scientific values.
 
 ## Open-data rule
 
@@ -31,4 +41,6 @@ Execution never contacts live GDC or attempts authenticated substitution.
 Registry/schema mismatch, corrupt/missing bytes, partial-coverage incompatibility,
 network access, stale attempt, and duplicate publication fail safely. File and S3
 integration produce the same scientific identity. Every supported analysis reaches a
-terminal Analysis and immutable Finding using a compact job payload.
+terminal Analysis and immutable Finding using a compact job payload. A minimal
+read-only run view exercises Analysis -> Job -> worker -> deterministic result through
+typed read models without browser-side scientific computation.

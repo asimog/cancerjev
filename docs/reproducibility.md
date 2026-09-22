@@ -7,6 +7,8 @@ A reproducible CancerJev result binds:
 - source/materialization hashes and canonical schema versions;
 - examined coverage and tested universe;
 - engine name/version, parameters, eligibility/exclusions, correction family/version;
+- for search-derived results, the originating SearchRun identity, tested/excluded
+  universe, candidate identity, and candidate-gate policy/version;
 - relevant runtime/environment identity;
 - canonical deterministic outputs.
 
