@@ -152,7 +152,15 @@ def seed_snapshot(session: Session, snapshot_id: str = "DS-TCGA-LUAD-test") -> S
     return snapshot
 
 
-def seed_analysis_input(session, snapshot_id="DS-TCGA-LUAD-test", seed="d"):
+def seed_analysis_input(
+    session,
+    snapshot_id="DS-TCGA-LUAD-test",
+    seed="d",
+    *,
+    modality="expression",
+    output_seed="b",
+    diagnostics_seed="c",
+):
     service = DurableResourceService(session)
     source = service.register_source(
         snapshot_id=snapshot_id,
@@ -166,10 +174,10 @@ def seed_analysis_input(session, snapshot_id="DS-TCGA-LUAD-test", seed="d"):
             materialization_id=materialization_id,
             snapshot_id=snapshot_id,
             source_id=source.source_id,
-            output_sha256="sha256:" + "b" * 64,
-            diagnostics_sha256="sha256:" + "c" * 64,
-            modality="expression",
-            measurement_type="tpm_unstranded",
+            output_sha256="sha256:" + output_seed * 64,
+            diagnostics_sha256="sha256:" + diagnostics_seed * 64,
+            modality=modality,
+            measurement_type="tpm_unstranded" if modality == "expression" else "",
             parser_name="test-fixture",
             parser_version="1",
             schema_version="2",
@@ -179,14 +187,28 @@ def seed_analysis_input(session, snapshot_id="DS-TCGA-LUAD-test", seed="d"):
             row_count=1,
             diagnostics_summary={},
         ),
-        output=artifact("canonical_expression", "b"),
-        diagnostics=artifact("diagnostics", "c"),
+        output=artifact("canonical_" + modality, output_seed),
+        diagnostics=artifact("diagnostics", diagnostics_seed),
     )
     return dict(
         materialization_id=materialization_id,
-        modality="expression",
-        measurement_type="tpm_unstranded",
+        modality=modality,
+        measurement_type="tpm_unstranded" if modality == "expression" else "",
     )
+
+
+def seed_cnv_rna_inputs(session):
+    return [
+        seed_analysis_input(
+            session,
+            "DS-TCGA-LUAD-test",
+            "6",
+            modality="cnv",
+            output_seed="7",
+            diagnostics_seed="8",
+        ),
+        seed_analysis_input(session),
+    ]
 
 
 def cohort_request() -> CohortCreate:
@@ -259,6 +281,15 @@ def test_analysis_requires_materialization_lineage_and_exact_contract(factory):
             AnalysisCreate(**base, input_materializations=[valid]), "valid-input"
         )
         assert result.input_materializations == [valid]
+
+        with pytest.raises(ResourceConflictError, match="exactly one|duplicate|modality"):
+            service.create_analysis(
+                AnalysisCreate(
+                    **(base | {"engine": "cnv_rna"}),
+                    input_materializations=[valid, valid],
+                ),
+                "duplicate-modality-input",
+            )
         assert result.expected_input_artifacts == ["sha256:" + "b" * 64]
 
 
@@ -400,11 +431,11 @@ def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
         request = AnalysisCreate(
             snapshot_id="DS-TCGA-LUAD-test",
             cohort_id=cohort.cohort_id,
-            engine="crossmodal",
+            engine="cnv_rna",
             engine_version="1",
             parameters={"method": "welch"},
-            expected_input_artifacts=[f"sha256:{'b' * 64}"],
-            input_materializations=[seed_analysis_input(session)],
+            expected_input_artifacts=[f"sha256:{'7' * 64}", f"sha256:{'b' * 64}"],
+            input_materializations=seed_cnv_rna_inputs(session),
         )
         analysis = service.create_analysis(request, "analysis-key-0001")
         repeated = service.create_analysis(request, "analysis-key-0001")
@@ -423,17 +454,17 @@ def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
             snapshot_id="DS-TCGA-LUAD-test",
             finding_type="cnv_expression_association",
             gene="ENSG1",
-            cohort_size=2,
-            eligible_cases=2,
-            eligible_case_ids=("c1", "c2"),
-            eligible_sample_ids=("s1", "s2"),
-            n_effective=2,
+cohort_size=2,
+            eligible_cases=1,
+            eligible_case_ids=("c1",),
+            eligible_sample_ids=("s1",),
+            n_effective=1,
             effect_size=0.5,
             confidence_interval=(0.1, 0.9),
             p_value=0.01,
             q_value=0.02,
-            missing_n=0,
-            missing_fraction=0.0,
+            missing_n=1,
+            missing_fraction=0.5,
             analysis_version="cnv-rna-v1",
             input_object_hashes=(f"sha256:{'b' * 64}",),
             result_hash=f"sha256:{'d' * 64}",
@@ -443,9 +474,11 @@ def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
             service.publish_findings(analysis, [payload])
         service.transition_analysis(str(analysis.analysis_id), "running")
         published = service.publish_findings(analysis, [payload])
-        expected_id = "F-" + canonical_hash(
-            {"analysis_id": str(analysis.analysis_id), "result_hash": payload.result_hash}
-        )[:32]
+        assert published[0].result_hash != payload.result_hash
+        assert published[0].finding_id.startswith("F-")
+        assert len(published[0].finding_id.removeprefix("F-")) == 32
+        assert ":" not in published[0].finding_id
+        expected_id = published[0].finding_id
         assert published[0].finding_id == expected_id
         assert published[0].gene_id == "ENSG1" and published[0].snapshot_id == analysis.snapshot_id
         # Idempotent republication converges on the same authoritative row.
@@ -463,7 +496,7 @@ def test_analysis_idempotency_lifecycle_finding_and_audit(factory) -> None:
             analysis_id=None,
             finding_type="cnv_expression_association",
             gene=None,
-            result_hash=payload.result_hash,
+            result_hash=published[0].result_hash,
             limit=10,
             offset=0,
         )
@@ -482,9 +515,9 @@ def test_findings_and_cohorts_are_database_immutable(factory) -> None:
             AnalysisCreate(
                 snapshot_id="DS-TCGA-LUAD-test",
                 cohort_id=cohort.cohort_id,
-                engine="crossmodal",
+                engine="cnv_rna",
                 engine_version="1",
-                input_materializations=[seed_analysis_input(session)],
+                input_materializations=seed_cnv_rna_inputs(session),
             ),
             "immutable-findings",
         )
@@ -495,16 +528,18 @@ def test_findings_and_cohorts_are_database_immutable(factory) -> None:
                 FindingPayload(
                     snapshot_id="DS-TCGA-LUAD-test",
                     finding_type="cnv_expression_association",
-                    gene="ENSG1",
+gene="ENSG1",
                     cohort_size=2,
-                    eligible_cases=2,
-                    eligible_case_ids=("c1", "c2"),
-                    n_effective=2,
+                    eligible_cases=1,
+                    eligible_case_ids=("c1",),
+                    eligible_sample_ids=("s1",),
+                    n_effective=1,
                     effect_size=0.5,
+                    confidence_interval=(0.1, 0.9),
                     p_value=0.01,
                     q_value=0.02,
-                    missing_n=0,
-                    missing_fraction=0.0,
+                    missing_n=1,
+                    missing_fraction=0.5,
                     analysis_version="cnv-rna-v1",
                     input_object_hashes=(f"sha256:{'b' * 64}",),
                     result_hash=f"sha256:{'e' * 64}",

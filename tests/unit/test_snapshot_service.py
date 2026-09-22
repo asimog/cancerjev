@@ -244,6 +244,28 @@ async def test_exact_duplicate_records_collapse(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_exact_duplicate_files_collapse(tmp_path: Path) -> None:
+    snapshot = await LogicalSnapshotService(
+        client=ListingClient([hit("f-1"), hit("f-1")]),
+        repository=FileSnapshotRepository(tmp_path),
+    ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+    assert [item.file_id for item in snapshot.objects] == ["f-1"]
+    root = tmp_path / "TCGA-LUAD" / snapshot.snapshot_id
+    assert query(root / "files.parquet").height == 1
+    assert query(root / "file_sample_links.parquet").height == 1
+
+
+@pytest.mark.asyncio
+async def test_conflicting_duplicate_files_fail_closed(tmp_path: Path) -> None:
+    changed = hit("f-1") | {"file_name": "conflict.tsv", "md5sum": "f" * 32}
+    with pytest.raises(ValueError, match="conflicting_file_identity"):
+        await LogicalSnapshotService(
+            client=ListingClient([hit("f-1"), changed]),
+            repository=FileSnapshotRepository(tmp_path),
+        ).create(LogicalSnapshotRequest(project_id="TCGA-LUAD"))
+
+
+@pytest.mark.asyncio
 async def test_v2_identity_is_invariant_to_hit_ordering(tmp_path: Path) -> None:
     forward = await LogicalSnapshotService(
         client=ListingClient([hit("f-1"), hit("f-2")]),

@@ -131,3 +131,17 @@ def test_multiple_testing_family_covers_tested_genes() -> None:
     # Two tested genes: the BH family inflates the raw p-values.
     assert all(finding.q_value >= finding.p_value for finding in findings)
     assert len({finding.result_hash for finding in findings}) == 2
+
+
+def test_identity_binds_the_complete_tested_universe() -> None:
+    cnv_a, rna_a = rows(20, "ENSG1")
+    alone = analyze_cnv_rna(make_context(), cnv_a, rna_a)[0]
+    # The second gene has the same local statistic, p-value, and q-value. Its
+    # presence must still change the correction-family/tested-universe identity.
+    cnv_b, rna_b = rows(20, "ENSG2")
+    together = analyze_cnv_rna(make_context(), cnv_a + cnv_b, rna_a + rna_b)
+    first = next(finding for finding in together if finding.gene == "ENSG1")
+    assert first.effect_size == alone.effect_size
+    assert first.p_value == alone.p_value
+    assert first.q_value == alone.q_value
+    assert first.result_hash != alone.result_hash

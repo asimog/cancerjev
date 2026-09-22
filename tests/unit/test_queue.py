@@ -19,7 +19,7 @@ from packages.database.jobs import (
     succeed,
 )
 from packages.database.models import Job, JobAttempt
-from workers.runtime import LeaseHeartbeat
+from workers.runtime import LeaseHeartbeat, _notify_terminal_failure
 
 
 class FakeSession:
@@ -174,7 +174,20 @@ def test_failure_reasons_are_the_bounded_contract() -> None:
         "UNSUPPORTED_ENGINE_OR_VERSION",
         "TRANSIENT_INFRASTRUCTURE",
         "RETRY_EXHAUSTED",
+        "INTERNAL_ERROR",
     } == FAILURE_REASONS
+
+
+def test_untyped_terminal_failure_still_notifies_the_resource_hook() -> None:
+    calls = []
+    _notify_terminal_failure(
+        {"test": lambda job_id, payload, reason: calls.append((job_id, payload, reason))},
+        "test",
+        uuid.uuid4(),
+        {"analysis_id": "a-1"},
+        None,
+    )
+    assert calls[0][2] == "INTERNAL_ERROR"
 
 
 def test_reaper_classifies_expired_jobs() -> None:

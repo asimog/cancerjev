@@ -116,6 +116,8 @@ def run_worker(
         except Exception as exc:
             reason = getattr(exc, "failure_reason", None)
             retryable = bool(getattr(exc, "retryable", False))
+            if reason is None and not retryable:
+                reason = "INTERNAL_ERROR"
             log.exception("job_failed job_id=%s job_type=%s", claimed.job_id, claimed.job_type)
             state = None
             try:
@@ -147,8 +149,9 @@ def _notify_terminal_failure(
     reason: str | None,
 ) -> None:
     hook = hooks.get(job_type)
-    if hook is None or not reason:
+    if hook is None:
         return
+    reason = reason or "INTERNAL_ERROR"
     try:
         hook(str(job_id), dict(payload), reason)
     except Exception:

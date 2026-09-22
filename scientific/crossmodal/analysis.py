@@ -80,6 +80,7 @@ def analyze_cnv_rna(
             continue
         tested.append((gene, finite, result))
     q_values = benjamini_hochberg([result.p_value for _, _, result in tested])
+    tested_gene_ids = tuple(gene for gene, _, _ in tested)
     findings = []
     for (gene, finite, result), q in zip(tested, q_values, strict=True):
         cases = tuple(sorted({key[0] for key, _, _ in finite}))
@@ -94,7 +95,7 @@ def analyze_cnv_rna(
             "eligible_sample_ids": list(samples),
             "missing_n": max(context.cohort_size - len(cases), 0),
         }
-        result_hash = _result_identity(context, gene, payload)
+        result_hash = result_identity(context, gene, payload, tested_gene_ids)
         findings.append(
             Finding(
                 snapshot_id=context.snapshot_id,
@@ -115,13 +116,19 @@ def analyze_cnv_rna(
                 ),
                 analysis_version=context.method_version,
                 input_object_hashes=tuple(sorted(context.input_hashes)),
+                tested_gene_ids=tested_gene_ids,
                 result_hash=result_hash,
             )
         )
     return findings
 
 
-def _result_identity(context: EngineContext, gene: str, payload: dict) -> str:
+def result_identity(
+    context: EngineContext,
+    gene: str,
+    payload: dict,
+    tested_gene_ids: tuple[str, ...],
+) -> str:
     """Canonical scientific identity: every material input and output is bound."""
     for name in ("effect_size", "p_value", "q_value"):
         if not _is_finite(payload[name]):
@@ -143,7 +150,12 @@ def _result_identity(context: EngineContext, gene: str, payload: dict) -> str:
             "method_version": context.method_version,
         },
         "parameters": context.parameters,
-        "family": {"finding_type": FINDING_TYPE, "gene_id": gene},
+        "family": {
+            "finding_type": FINDING_TYPE,
+            "gene_id": gene,
+            "tested_gene_ids": sorted(tested_gene_ids),
+            "multiple_testing": "benjamini-hochberg-v1",
+        },
         "eligibility": {
             "min_pairs": MIN_PAIRS,
             "finite_required": True,

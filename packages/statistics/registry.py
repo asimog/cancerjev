@@ -20,6 +20,8 @@ class EngineSpec:
     inputs: tuple[str, ...]
     #: Canonical modality feeding each engine input, same order as `inputs`.
     modalities: tuple[str, ...]
+    #: Required canonical measurement type for each modality, same order.
+    measurement_types: tuple[str, ...]
     run: Callable[..., list]
 
 
@@ -31,6 +33,7 @@ ENGINES: dict[str, EngineSpec] = {
         method_version="cnv-rna-v1",
         inputs=("cnv_rows", "rna_rows"),
         modalities=("cnv", "expression"),
+        measurement_types=("", "tpm_unstranded"),
         run=analyze_cnv_rna,
     ),
 }

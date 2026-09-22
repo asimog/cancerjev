@@ -221,7 +221,16 @@ def rna_rows(cases):
     return [(case, SAMPLES[case], GENE, 2 * (int(case[1:]) - 1) + 1) for case in cases]
 
 
-def build_analysis(factory, settings, store, cohort_cases, *, rna_cases=None, engine="cnv_rna"):
+def build_analysis(
+    factory,
+    settings,
+    store,
+    cohort_cases,
+    *,
+    rna_cases=None,
+    materialization_cases=None,
+    engine="cnv_rna",
+):
     snapshot_id = "DS-TCGA-LUAD-exec"
     with factory.begin() as session:
         service = DurableResourceService(session)
@@ -235,10 +244,16 @@ def build_analysis(factory, settings, store, cohort_cases, *, rna_cases=None, en
                 selection_policy_version="primary-v1",
             )
         )
+    input_cases = materialization_cases or cohort_cases
     inputs = [
-        register_modality(factory, settings, store, snapshot_id, "cnv", cnv_rows(cohort_cases)),
+        register_modality(factory, settings, store, snapshot_id, "cnv", cnv_rows(input_cases)),
         register_modality(
-            factory, settings, store, snapshot_id, "expression", rna_rows(rna_cases or cohort_cases)
+            factory,
+            settings,
+            store,
+            snapshot_id,
+            "expression",
+            rna_rows(rna_cases or input_cases),
         ),
     ]
     with factory.begin() as session:
@@ -307,6 +322,25 @@ def test_cohort_membership_filters_rows_and_discloses_missingness(factory, setti
         assert payload["missing_n"] == 1
         assert payload["missing_fraction"] == 0.2
         assert analysis.analysis_id == finding.analysis_id
+
+
+def test_out_of_cohort_artifact_rows_cannot_become_finding_evidence(factory, settings):
+    _, store = seed_snapshot_graph(factory, settings)
+    build_analysis(
+        factory,
+        settings,
+        store,
+        CASES[:4],
+        materialization_cases=CASES,
+    )
+    claimed = claim_analysis(factory, "worker-exec")
+    assert AnalysisExecutionService.run_claimed(claimed)["published"] == 1
+    with factory() as session:
+        payload = session.scalar(select(FindingRow)).payload
+        assert payload["cohort_size"] == 4
+        assert payload["eligible_case_ids"] == list(CASES[:4])
+        assert payload["eligible_sample_ids"] == [SAMPLES[c] for c in CASES[:4]]
+        assert payload["n_effective"] == 4
 
 
 def test_unsupported_engine_fails_deterministically(factory, settings):
