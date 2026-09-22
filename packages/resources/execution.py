@@ -60,6 +60,26 @@ class TransientInfrastructure(ExecutionFailure):
     failure_reason = "TRANSIENT_INFRASTRUCTURE"
 
 
+def _guarded_artifact_operation(label: str, operation):
+    """Translate object-store and frozen-graph failures into bounded reasons.
+
+    Missing, unreadable, tampered, or backend-mismatched bytes must fail as
+    deterministic integrity or transient infrastructure, never as a raw
+    ``FileNotFoundError``/``ValueError`` the worker cannot classify.
+    """
+    try:
+        return operation()
+    except ObjectStoreServiceError as exc:
+        raise TransientInfrastructure(str(exc)) from exc
+    except (
+        ObjectStorePermissionError,
+        ObjectStoreError,
+        FileNotFoundError,
+        ValueError,
+    ) as exc:
+        raise IntegrityFailure(f"{label}: {exc}") from exc
+
+
 class AnalysisExecutionService:
     def __init__(self, session: Session, store: ObjectStore):
         self.session = session
@@ -135,13 +155,13 @@ class AnalysisExecutionService:
             spec = resolve_engine(frozen.engine, frozen.engine_version)
         except ValueError as exc:
             raise UnsupportedEngine(str(exc)) from exc
+        cohort = cls._cohort(factory, store, frozen)
         with tempfile.TemporaryDirectory(prefix="cancerjev-execute-") as tmp:
             staged = cls._stage_inputs(factory, store, frozen, spec, Path(tmp))
             rows_by_modality = {
-                modality: cls._read_rows(path, modality)
+                modality: cls._cohort_rows(cls._read_rows(path, modality), cohort)
                 for modality, path in staged.items()
             }
-        cohort = cls._cohort(factory, frozen)
         engine_context = frozen.engine_context(cohort, spec)
         return spec.run(
             engine_context,
@@ -164,35 +184,53 @@ class AnalysisExecutionService:
                 if (
                     materialization.snapshot_id != frozen.snapshot_id
                     or materialization.modality != expected["modality"]
+                    or materialization.measurement_type != expected["measurement_type"]
                 ):
                     raise IntegrityFailure(
                         "input materialization drifted from the frozen analysis contract"
                     )
-                resolved.append((materialization.modality, materialization.output_sha256))
-            if sorted(frozen.expected_input_artifacts) != sorted(hash for _, hash in resolved):
-                raise IntegrityFailure("resolved artifacts do not match the frozen contract")
-            if {modality for modality, _ in resolved} != set(spec.modalities):
-                raise ExecutionFailure(
-                    f"engine {spec.engine} requires modalities {spec.modalities}"
+                resolved.append(
+                    (
+                        materialization.modality,
+                        materialization.measurement_type,
+                        materialization.output_sha256,
+                    )
                 )
+            if sorted(frozen.expected_input_artifacts) != sorted(
+                digest for _, _, digest in resolved
+            ):
+                raise IntegrityFailure("resolved artifacts do not match the frozen contract")
+            if len(resolved) != len(spec.modalities) or {
+                modality for modality, _, _ in resolved
+            } != set(spec.modalities):
+                raise ExecutionFailure(
+                    f"engine {spec.engine} requires exactly one input for {spec.modalities}"
+                )
+            by_modality = {
+                modality: (measurement, digest)
+                for modality, measurement, digest in resolved
+            }
+            for modality, measurement in zip(
+                spec.modalities, spec.measurement_types, strict=True
+            ):
+                if by_modality[modality][0] != measurement:
+                    raise ExecutionFailure(
+                        f"engine {spec.engine} requires {modality} measurement {measurement!r}"
+                    )
             reader = FrozenSnapshotReader(service, store, StorageSettings())
             paths = {}
-            for modality, digest in resolved:
+            for modality in spec.modalities:
+                digest = by_modality[modality][1]
                 artifact = service.artifacts.get(digest)
                 if artifact is None:
                     raise IntegrityFailure(f"input artifact not registered: {digest}")
                 destination = tmp / (modality + ".parquet")
-                try:
-                    reader.stage(artifact, destination)
-                except ObjectStoreServiceError as exc:
-                    raise TransientInfrastructure(str(exc)) from exc
-                except (
-                    ObjectStorePermissionError,
-                    ObjectStoreError,
-                    FileNotFoundError,
-                    ValueError,
-                ) as exc:
-                    raise IntegrityFailure(f"input artifact unusable: {exc}") from exc
+                _guarded_artifact_operation(
+                    "input artifact unusable",
+                    lambda artifact=artifact, destination=destination: reader.stage(
+                        artifact, destination
+                    ),
+                )
                 paths[modality] = destination
         return paths
 
@@ -219,7 +257,23 @@ class AnalysisExecutionService:
         return rows
 
     @staticmethod
-    def _cohort(factory, frozen: "_FrozenAnalysis"):
+    def _cohort_rows(rows: list[dict], cohort: dict) -> list[dict]:
+        cases = set(cohort["case_ids"])
+        samples = set(cohort["sample_ids"])
+        pairs = set(cohort["member_pairs"])
+        selected = []
+        for row in rows:
+            pair = (row["case_id"], row["sample_id"])
+            if pair in pairs:
+                selected.append(row)
+            elif row["case_id"] in cases or row["sample_id"] in samples:
+                raise ExecutionFailure(
+                    "molecular row case/sample relationship conflicts with the frozen cohort"
+                )
+        return selected
+
+    @staticmethod
+    def _cohort(factory, store: ObjectStore, frozen: "_FrozenAnalysis"):
         with factory() as session:
             service = DurableResourceService(session)
             cohort = service.cohorts.get(frozen.cohort_id)
@@ -228,10 +282,29 @@ class AnalysisExecutionService:
             snapshot = service.snapshots.get(frozen.snapshot_id)
             if snapshot is None:
                 raise IntegrityFailure("snapshot not found")
+            with tempfile.TemporaryDirectory(prefix="cancerjev-cohort-execute-") as tmp:
+                _, graph = _guarded_artifact_operation(
+                    "frozen snapshot unusable",
+                    lambda: FrozenSnapshotReader(service, store, StorageSettings()).load(
+                        frozen.snapshot_id, Path(tmp)
+                    ),
+                )
+            sample_case = {sample.sample_id: sample.case_id for sample in graph.samples}
+            member_pairs = tuple(
+                sorted(
+                    (sample_case[sample_id], sample_id)
+                    for sample_id in cohort.sample_ids
+                    if sample_id in sample_case and sample_case[sample_id] in cohort.case_ids
+                )
+            )
+            if len(member_pairs) != len(cohort.sample_ids):
+                raise IntegrityFailure("cohort membership drifted from the frozen snapshot")
             return {
                 "cohort_id": cohort.cohort_id,
                 "content_hash": cohort.content_hash,
                 "case_ids": tuple(cohort.case_ids),
+                "sample_ids": tuple(cohort.sample_ids),
+                "member_pairs": member_pairs,
                 "snapshot_hash": snapshot.snapshot_hash,
             }
 

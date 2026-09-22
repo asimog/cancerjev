@@ -43,7 +43,9 @@ from packages.schemas.resources import (
     CohortCreate,
 )
 from packages.schemas.snapshot import SnapshotRecord
+from packages.statistics.registry import resolve_engine
 from packages.storage.config import StorageSettings
+from scientific.crossmodal.analysis import EngineContext, result_identity, runtime_environment
 
 
 class ResourceNotFoundError(LookupError):
@@ -327,6 +329,31 @@ class DurableResourceService:
                 )
             inputs[expected.materialization_id] = expected.model_dump(mode="json")
             resolved_hashes.add(value.output_sha256)
+        try:
+            spec = resolve_engine(request.engine, request.engine_version)
+        except ValueError:
+            # Unsupported engines retain the existing durable-failure behavior:
+            # the worker records UNSUPPORTED_ENGINE_OR_VERSION.
+            spec = None
+        if spec is not None:
+            by_modality = {}
+            for expected in request.input_materializations:
+                if expected.modality in by_modality:
+                    raise ResourceConflictError(
+                        f"engine requires exactly one {expected.modality} materialization"
+                    )
+                by_modality[expected.modality] = expected
+            if set(by_modality) != set(spec.modalities):
+                raise ResourceConflictError(
+                    f"engine requires exactly one input for modalities {spec.modalities}"
+                )
+            for modality, measurement_type in zip(
+                spec.modalities, spec.measurement_types, strict=True
+            ):
+                if by_modality[modality].measurement_type != measurement_type:
+                    raise ResourceConflictError(
+                        f"engine requires {modality} measurement {measurement_type!r}"
+                    )
         if (
             request.expected_input_artifacts
             and set(request.expected_input_artifacts) != resolved_hashes
@@ -405,18 +432,51 @@ class DurableResourceService:
     ) -> list[Finding]:
         """Server-owned publication of computed scientific payloads.
 
-        Finding identity is derived here from the analysis and the
-        deterministic result hash; callers can never supply authoritative IDs
-        or hashes. Concurrent attempts converge on the unique
+        Finding identity is recomputed here from persisted scientific context
+        and deterministic outputs; callers can never supply authoritative IDs,
+        versions, input hashes, tested universes, or result hashes. Concurrent
+        attempts converge on the unique
         (analysis_id, result_hash) publication instead of duplicating rows.
         """
         if analysis.state != "running":
             raise ResourceConflictError("finding publication requires a running analysis")
+        snapshot = self.snapshots.get(analysis.snapshot_id)
+        cohort = self.cohorts.get(analysis.cohort_id) if analysis.cohort_id else None
+        if snapshot is None or cohort is None:
+            raise ResourceConflictError("finding publication context is unavailable")
+        try:
+            spec = resolve_engine(analysis.engine, analysis.engine_version)
+        except ValueError as exc:
+            raise ResourceConflictError(str(exc)) from exc
+        context = EngineContext(
+            snapshot_id=analysis.snapshot_id,
+            snapshot_hash=snapshot.snapshot_hash,
+            cohort_id=analysis.cohort_id,
+            cohort_content_hash=cohort.content_hash,
+            cohort_size=len(cohort.case_ids),
+            engine_version=analysis.engine_version,
+            method_version=spec.method_version,
+            parameters=dict(analysis.parameters),
+            input_hashes=tuple(sorted(analysis.expected_input_artifacts)),
+            environment=runtime_environment(),
+        )
+        tested_gene_ids = tuple(sorted(finding.gene for finding in findings))
+        if len(set(tested_gene_ids)) != len(tested_gene_ids):
+            raise ResourceConflictError("duplicate finding gene in one tested universe")
         published: list[Finding] = []
         for finding in findings:
+            authoritative = self._attest_finding(
+                finding,
+                context=context,
+                cohort=cohort,
+                tested_gene_ids=tested_gene_ids,
+            )
             finding_id = "F-" + canonical_hash(
-                {"analysis_id": str(analysis.analysis_id), "result_hash": finding.result_hash}
-            )[:32]
+                {
+                    "analysis_id": str(analysis.analysis_id),
+                    "result_hash": authoritative.result_hash,
+                }
+            ).removeprefix("sha256:")[:32]
             published.append(
                 self.findings.save(
                     Finding(
@@ -424,18 +484,74 @@ class DurableResourceService:
                         analysis_id=analysis.analysis_id,
                         snapshot_id=analysis.snapshot_id,
                         cohort_id=analysis.cohort_id,
-                        finding_type=finding.finding_type,
-                        gene_id=finding.gene,
+                        finding_type=authoritative.finding_type,
+                        gene_id=authoritative.gene,
                         gene_symbol=None,
-                        analysis_version=finding.analysis_version,
-                        result_hash=finding.result_hash,
-                        payload=finding.model_dump(mode="json"),
+                        analysis_version=authoritative.analysis_version,
+                        result_hash=authoritative.result_hash,
+                        payload=authoritative.model_dump(mode="json"),
                     )
                 )
             )
         for row in published:
             self._audit("finding.published", "finding", row.finding_id)
         return published
+
+    @staticmethod
+    def _attest_finding(
+        finding: FindingPayload,
+        *,
+        context: EngineContext,
+        cohort: Cohort,
+        tested_gene_ids: tuple[str, ...],
+    ) -> FindingPayload:
+        eligible_cases = tuple(sorted(set(finding.eligible_case_ids)))
+        eligible_samples = tuple(sorted(set(finding.eligible_sample_ids)))
+        if not set(eligible_cases).issubset(cohort.case_ids) or not set(
+            eligible_samples
+        ).issubset(cohort.sample_ids):
+            raise ResourceConflictError("finding eligibility exceeds the frozen cohort")
+        if finding.eligible_cases != len(eligible_cases):
+            raise ResourceConflictError("finding eligible case count is inconsistent")
+        if finding.n_effective != len(eligible_samples):
+            raise ResourceConflictError("finding effective sample count is inconsistent")
+        missing_n = context.cohort_size - len(eligible_cases)
+        missing_fraction = missing_n / context.cohort_size if context.cohort_size else 0
+        payload = {
+            "effect_size": finding.effect_size,
+            "p_value": finding.p_value,
+            "q_value": finding.q_value,
+            "confidence_interval": list(finding.confidence_interval)
+            if finding.confidence_interval is not None
+            else None,
+            "n_effective": finding.n_effective,
+            "eligible_case_ids": list(eligible_cases),
+            "eligible_sample_ids": list(eligible_samples),
+            "missing_n": missing_n,
+        }
+        if payload["confidence_interval"] is None:
+            raise ResourceConflictError("finding confidence interval is required")
+        computed_hash = result_identity(
+            context,
+            finding.gene,
+            payload,
+            tested_gene_ids,
+        )
+        return finding.model_copy(
+            update={
+                "snapshot_id": context.snapshot_id,
+                "cohort_size": context.cohort_size,
+                "eligible_cases": len(eligible_cases),
+                "eligible_case_ids": eligible_cases,
+                "eligible_sample_ids": eligible_samples,
+                "missing_n": missing_n,
+                "missing_fraction": missing_fraction,
+                "analysis_version": context.method_version,
+                "input_object_hashes": tuple(sorted(context.input_hashes)),
+                "tested_gene_ids": tested_gene_ids,
+                "result_hash": computed_hash,
+            }
+        )
 
     def _audit(
         self,

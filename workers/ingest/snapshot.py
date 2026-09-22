@@ -39,13 +39,21 @@ class LogicalSnapshotService:
         hits = payload.get("data", {}).get("hits", [])
         # Raw GDC hits deliberately never cross the canonical boundary.  GDC adds
         # requested/nested fields over time, while SnapshotObject remains strict.
-        objects = tuple(sorted((map_snapshot_object(hit) for hit in hits), key=lambda x: x.file_id))
+        objects = tuple(
+            unique_records(
+                (map_snapshot_object(hit) for hit in hits),
+                lambda record: record.file_id,
+                label="file",
+            )
+        )
         for item in objects:
             require_open(item.access)
 
         query = open_project_files(request.project_id)
         mapped = [map_file_hit(hit) for hit in hits]
-        files = [item[0] for item in mapped]
+        files = unique_records(
+            (item[0] for item in mapped), lambda record: record.file_id, label="file"
+        )
 
         # Conflicting duplicate biological records must fail deterministically;
         # exact duplicates collapse. Records are order-canonical by identity key.

@@ -25,4 +25,5 @@ class Finding(StrictRecord):
     analysis_version: str
     evidence_ids: tuple[str, ...] = ()
     input_object_hashes: tuple[str, ...]
+    tested_gene_ids: tuple[str, ...] = ()
     result_hash: str

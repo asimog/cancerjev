@@ -17,6 +17,7 @@ FAILURE_REASONS = frozenset(
         "UNSUPPORTED_ENGINE_OR_VERSION",
         "TRANSIENT_INFRASTRUCTURE",
         "RETRY_EXHAUSTED",
+        "INTERNAL_ERROR",
     }
 )
 
@@ -128,6 +129,8 @@ def fail(
 
     ``LEASE_LOST`` never mutates job state and is therefore not a reason.
     """
+    if reason is None and not retryable:
+        reason = "INTERNAL_ERROR"
     if reason is not None and reason not in FAILURE_REASONS:
         raise ValueError(f"unknown failure reason: {reason}")
     job = _owned(
